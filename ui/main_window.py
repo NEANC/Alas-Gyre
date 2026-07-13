@@ -59,6 +59,17 @@ except Exception:
         return widget is not None
 
 
+def safe_emit_signal(signal, *args):
+    """安全发射 Qt 信号，忽略信号源已删除的生命周期异常。"""
+    try:
+        signal.emit(*args)
+        return True
+    except RuntimeError as exc:
+        if "Signal source has been deleted" in str(exc):
+            return False
+        raise
+
+
 MAIN_CARD_WIDTH = 294
 MAIN_TITLE_HEIGHT = 30
 MAIN_BOTTOM_HEIGHT = 40
@@ -238,7 +249,7 @@ class MainConfigRow(QWidget):
                     self.main_card.status_update_signal.emit("disconnected", "")
                 self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
             finally:
-                self.btn_enable_signal.emit(True)
+                safe_emit_signal(self.btn_enable_signal, True)
 
         threading.Thread(target=send_req, daemon=True).start()
 
