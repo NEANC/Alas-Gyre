@@ -238,24 +238,25 @@ class MainConfigRow(QWidget):
                 )
                 if result.ok:
                     status = normalize_status(result.data.get("status", "idle"))
-                    self.main_card.status_all_update_signal.emit({self.config_name: status}, {self.config_name: ""})
+                    safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: status}, {self.config_name: ""})
                     if self.main_card.current_config == self.config_name:
-                        self.main_card.status_update_signal.emit(status, "")
+                        safe_emit_signal(self.main_card.status_update_signal, status, "")
                     if result.degraded:
                         self.main_card._notify_websocket_degraded_once()
                 else:
-                    self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
+                    safe_emit_signal(self.main_card.control_error_signal, action, tr("control_connect_failed"))
                 time.sleep(0.5)
                 self.main_card._start_poll_thread()
             except Exception as e:
                 print(f"[Error] Failed to send control command: {e}")
-                self.main_card.status_all_update_signal.emit(
+                safe_emit_signal(
+                    self.main_card.status_all_update_signal,
                     {self.config_name: "disconnected"},
                     {self.config_name: ""},
                 )
                 if self.main_card.current_config == self.config_name:
-                    self.main_card.status_update_signal.emit("disconnected", "")
-                self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
+                    safe_emit_signal(self.main_card.status_update_signal, "disconnected", "")
+                safe_emit_signal(self.main_card.control_error_signal, action, tr("control_connect_failed"))
             finally:
                 safe_emit_signal(self.btn_enable_signal, True)
 
@@ -433,7 +434,7 @@ class CardWidget(QFrame):
         if self.websocket_degraded_notified:
             return
         self.websocket_degraded_notified = True
-        self.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
+        safe_emit_signal(self.control_error_signal, "degraded", tr("websocket_degraded_notice"))
 
     def apply_task_display_settings(self):
         for row in self.rows.values():
@@ -649,13 +650,13 @@ class CardWidget(QFrame):
             if result.ok:
                 configs = result.data.get("configs", ["alas"])
                 if isinstance(configs, list) and configs:
-                    self.configs_update_signal.emit(configs)
+                    safe_emit_signal(self.configs_update_signal, configs)
                 if result.degraded:
                     self._notify_websocket_degraded_once()
             else:
-                self.control_error_signal.emit("configs", tr("control_connect_failed"))
+                safe_emit_signal(self.control_error_signal, "configs", tr("control_connect_failed"))
         except Exception:
-            self.status_update_signal.emit("disconnected", "")
+            safe_emit_signal(self.status_update_signal, "disconnected", "")
         finally:
             with self._poll_lock:
                 self._configs_fetching = False
@@ -729,16 +730,16 @@ class CardWidget(QFrame):
                     str(config_name): str(task)
                     for config_name, task in data.get("tasks", {}).items()
                 }
-                self.status_all_update_signal.emit(statuses, tasks)
+                safe_emit_signal(self.status_all_update_signal, statuses, tasks)
                 current_status = statuses.get(self.current_config, "idle")
                 current_task = tasks.get(self.current_config, "")
-                self.status_update_signal.emit(current_status, current_task)
+                safe_emit_signal(self.status_update_signal, current_status, current_task)
                 if result.degraded:
                     self._notify_websocket_degraded_once()
             else:
-                self.status_update_signal.emit("disconnected", "")
+                safe_emit_signal(self.status_update_signal, "disconnected", "")
         except Exception:
-            self.status_update_signal.emit("disconnected", "")
+            safe_emit_signal(self.status_update_signal, "disconnected", "")
 
     def restore_main_window(self):
         if hasattr(self, "mini_dialog"):

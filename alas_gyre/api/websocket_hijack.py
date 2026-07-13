@@ -23,6 +23,10 @@ UPDATE_ACTION_KEYWORDS = {
     "apply": ("进行更新", "update now", "apply update"),
     "cancel": ("取消更新", "cancel update"),
 }
+CONFIG_ACTION_KEYWORDS = {
+    "start": ("启动", "start"),
+    "stop": ("停止", "stop"),
+}
 try:
     import websocket
 
@@ -312,6 +316,23 @@ def find_update_action_callback(state, action):
     raise NavigationError(f"update_action_callback_not_found:{action}")
 
 
+def find_config_action_callback(state, action):
+    """查找配置启动或停止按钮回调 ID。"""
+    keywords = CONFIG_ACTION_KEYWORDS.get(action, ())
+    for output in state.outputs:
+        text = _searchable_text(output)
+        lower_text = text.lower()
+        if not any(keyword.lower() in lower_text for keyword in keywords):
+            continue
+        callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
+        if callback_id:
+            return callback_id
+        callback_id = _search_callback_id(output) or _search_callback_id(text)
+        if callback_id:
+            return callback_id
+    raise NavigationError(f"config_action_callback_not_found:{action}")
+
+
 def send_callback_event(ws, task_id, callback_id, data=None):
     """向 PyWebIO 发送回调事件。"""
     _ = task_id
@@ -385,8 +406,17 @@ def open_pywebio_websocket(config, timeout=5.0):
 
 def probe_websocket(config, timeout=5.0):
     """验证 WebSocket 可连接且能识别多配置。"""
-    check_pywebio_home(config, timeout=timeout)
-    ws = open_pywebio_websocket(config, timeout=timeout)
+    home_error = None
+    try:
+        check_pywebio_home(config, timeout=timeout)
+    except Exception as exc:
+        home_error = exc
+    try:
+        ws = open_pywebio_websocket(config, timeout=timeout)
+    except Exception:
+        if home_error:
+            raise home_error
+        raise
     try:
         local_storage = {"aside": str(config.get("current_config", "") or "") or None}
         state = collect_initial_state(ws, local_storage=local_storage)
@@ -415,9 +445,31 @@ def get_status_all(config):
 
 def post_config_action(config, config_name, action):
     """通过 WebSocket 对指定配置执行启动或停止。"""
-    configs = get_configs(config)
-    if config_name not in configs:
-        raise ConfigDetectionError("config_not_found")
     if action not in {"start", "stop"}:
         raise WebSocketHijackError("unsupported_action")
-    raise WebSocketHijackError("websocket_action_not_implemented")
+    home_error = None
+    try:
+        check_pywebio_home(config)
+    except Exception as exc:
+        home_error = exc
+    try:
+        ws = open_pywebio_websocket(config)
+    except Exception:
+        if home_error:
+            raise home_error
+        raise
+    try:
+        local_storage = {"aside": str(config_name or config.get("current_config", "") or "") or None}
+        state = collect_initial_state(ws, local_storage=local_storage)
+        configs = extract_instance_names(state)
+        if config_name not in configs:
+            raise ConfigDetectionError("config_not_found")
+        callback_id = find_config_action_callback(state, action)
+        send_callback_event(ws, "", callback_id)
+        status = "running" if action == "start" else "idle"
+        return {"config": config_name, "status": status}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
