@@ -120,7 +120,7 @@ class PersistentConfigWorker:
     config: dict
     config_name: str
     buttons: SchedulerButtonSet = field(default_factory=SchedulerButtonSet)
-    status: str = "error"
+    status: str = "disconnected"
     last_error: str = ""
 
     def update_from_state(self, state):
