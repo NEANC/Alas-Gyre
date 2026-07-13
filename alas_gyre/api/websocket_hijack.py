@@ -255,7 +255,7 @@ def _has_status_evidence(state):
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
         if "header_status" in scope or "pywebio-scope-header_status" in text:
             return True
-        if "pywebio-scope-alas-instance-" not in scope and "pywebio-scope-alas-instance-" not in text:
+        if "pywebio-scope-alas-instance-" not in scope:
             continue
         if any(status_icon in text for status_icon in status_icons):
             return True
