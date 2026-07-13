@@ -5,6 +5,7 @@ import threading
 from PySide6.QtCore import Qt, Signal, QTimer, QSize, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -17,7 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_mode import CONNECTION_MODE_AUTO, normalize_connection_mode
+from alas_gyre.api.control_gateway import test_connection
 from alas_gyre.api.overlay_launcher import RUNTIME_DIR_NAME, generate_portable_overlay_launchers
 from alas_gyre.core.config import ensure_api_token, save_config
 from alas_gyre.core.paths import app_base_dir
@@ -240,6 +242,30 @@ class InitSetupWindow(QDialog):
         token_layout.addWidget(self.generateBtn)
         panel_layout.addLayout(token_layout)
 
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(10)
+        mode_label = QLabel(tr("connection_mode"))
+        mode_label.setObjectName("formLabel")
+        mode_label.setFixedWidth(82)
+        self.connectionModeCombo = QComboBox()
+        self.connectionModeCombo.setObjectName("settingsInput")
+        self.connectionModeCombo.setFixedHeight(30)
+        self.connectionModeCombo.addItem(tr("connection_mode_overlay"), "overlay")
+        self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
+        self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
+        mode_index = self.connectionModeCombo.findData(normalize_connection_mode(self.config))
+        self.connectionModeCombo.setCurrentIndex(
+            mode_index if mode_index >= 0 else self.connectionModeCombo.findData(CONNECTION_MODE_AUTO)
+        )
+        mode_layout.addWidget(mode_label)
+        mode_layout.addWidget(self.connectionModeCombo, stretch=1)
+        panel_layout.addLayout(mode_layout)
+
+        mode_hint = QLabel(tr("init_connection_mode_desc"))
+        mode_hint.setObjectName("initSubtle")
+        mode_hint.setWordWrap(True)
+        panel_layout.addWidget(mode_hint)
+
         token_hint = QLabel(tr("token_auto_hint"))
         token_hint.setObjectName("initSubtle")
         token_hint.setWordWrap(True)
@@ -430,6 +456,7 @@ class InitSetupWindow(QDialog):
         self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
         self.config["port"] = self.portInput.text().strip() or "22267"
         self.config["api_token"] = self.tokenInput.text().strip()
+        self.config["connection_mode"] = self.connectionModeCombo.currentData() or CONNECTION_MODE_AUTO
 
     def _set_status(self, text, state="normal", tooltip=None):
         self.statusLabel.setText(text)
@@ -509,7 +536,7 @@ class InitSetupWindow(QDialog):
 
     def _finish_setup(self):
         self._sync_config_from_ui()
-        if not self.runtime_generated:
+        if self.config.get("connection_mode") != "websocket" and not self.runtime_generated:
             if not ask_confirm(
                 self,
                 tr("runtime_missing_confirm_title"),
@@ -532,30 +559,32 @@ class InitSetupWindow(QDialog):
             self._on_test_result(False, tr("test_invalid"))
             return
 
+        connection_mode = self.config.get("connection_mode", CONNECTION_MODE_AUTO)
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
         self.testBtn.setEnabled(False)
         self.testBtn.setProperty("state", "testing")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        threading.Thread(target=self._test_api, daemon=True).start()
+        threading.Thread(target=self._test_api, args=(connection_mode,), daemon=True).start()
 
-    def _test_api(self):
+    def _test_api(self, connection_mode):
         success = False
         message = ""
         try:
-            resp = api_request("GET",
-                gyre_api_url(self.config, "health"),
-                headers=api_headers(self.config),
-                timeout=2.0,
-            )
-            success = resp.status_code == 200
-            if resp.status_code == 401:
-                message = tr("test_unauthorized")
-            elif resp.status_code == 404:
-                message = tr("test_overlay_missing")
-            elif not success:
-                message = f"HTTP {resp.status_code}"
+            test_config = dict(self.config)
+            test_config["connection_mode"] = connection_mode
+            result = test_connection(test_config, timeout=3.0)
+            success = result.ok
+            if success and result.mode == "websocket":
+                count = len(result.data.get("configs", []))
+                message = tr("websocket_test_success", count=count)
+                if result.degraded:
+                    message = tr("websocket_degraded_notice") + "\n" + message
+            elif success:
+                message = tr("test_success")
+            else:
+                message = tr("test_failed")
         except Exception as exc:
             message = str(exc)
         self.test_result_signal.emit(success, message)
