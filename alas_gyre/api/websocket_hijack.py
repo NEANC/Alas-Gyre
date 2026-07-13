@@ -181,8 +181,13 @@ def find_update_action_callback(state, action):
     keywords = UPDATE_ACTION_KEYWORDS.get(action, ())
     for output in state.outputs:
         text = str(output.get("content", "") if isinstance(output, dict) else output)
+        full_text = str(output)
         lower_text = text.lower()
-        if any(keyword.lower() in lower_text for keyword in keywords):
+        lower_full_text = full_text.lower()
+        if any(
+            keyword.lower() in lower_text or keyword.lower() in lower_full_text
+            for keyword in keywords
+        ):
             callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
             if callback_id:
                 return callback_id
