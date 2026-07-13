@@ -154,6 +154,15 @@ def _search_callback_id(text):
     return match.group(0) if match else ""
 
 
+def _searchable_text(value):
+    """把 PyWebIO 输出结构转换为可搜索文本。"""
+    if isinstance(value, dict):
+        return " ".join(_searchable_text(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return " ".join(_searchable_text(item) for item in value)
+    return str(value or "")
+
+
 def find_navigation_callback(state, target):
     """查找导航到目标页面的回调 ID。"""
     keywords = NAVIGATION_KEYWORDS.get(target, ())
@@ -180,14 +189,9 @@ def find_update_action_callback(state, action):
     """查找更新器动作回调 ID。"""
     keywords = UPDATE_ACTION_KEYWORDS.get(action, ())
     for output in state.outputs:
-        text = str(output.get("content", "") if isinstance(output, dict) else output)
-        full_text = str(output)
+        text = _searchable_text(output)
         lower_text = text.lower()
-        lower_full_text = full_text.lower()
-        if any(
-            keyword.lower() in lower_text or keyword.lower() in lower_full_text
-            for keyword in keywords
-        ):
+        if any(keyword.lower() in lower_text for keyword in keywords):
             callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
             if callback_id:
                 return callback_id
