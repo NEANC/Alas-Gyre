@@ -24,8 +24,8 @@ UPDATE_ACTION_KEYWORDS = {
     "cancel": ("取消更新", "cancel update"),
 }
 CONFIG_ACTION_KEYWORDS = {
-    "start": ("启动", "start"),
-    "stop": ("停止", "stop"),
+    "start": ("启动", "啟動", "実行", "start"),
+    "stop": ("停止", "中止", "stop"),
 }
 try:
     import websocket
@@ -33,7 +33,7 @@ try:
     WebSocketTimeoutException = websocket.WebSocketTimeoutException
 except Exception:
     WebSocketTimeoutException = TimeoutError
-WEBSOCKET_TIMEOUT_ERRORS = (TimeoutError, WebSocketTimeoutException)
+WEBSOCKET_TIMEOUT_ERRORS = (TimeoutError, WebSocketTimeoutException, ConnectionResetError)
 
 
 class WebSocketHijackError(Exception):
@@ -162,17 +162,23 @@ def send_js_yield_event(ws, task_id, data=None):
     ws.send(json.dumps(payload, ensure_ascii=False))
 
 
-def handle_pywebio_client_eval(ws, message, local_storage=None):
-    """处理 PyWebIO 需要浏览器执行并回传的脚本。"""
+def handle_pywebio_client_script(ws, message, local_storage=None):
+    """处理 PyWebIO 要求浏览器执行的脚本。"""
     if message.command != "run_script":
-        return False
-    if not message.spec.get("eval"):
         return False
     code = str(message.spec.get("code", "") or "")
     args = message.spec.get("args", {})
     if not isinstance(args, dict):
         args = {}
-    local_storage = local_storage or {}
+    if local_storage is None:
+        local_storage = {}
+    if "localStorage.setItem" in code:
+        key = str(args.get("key", "") or "")
+        if key:
+            local_storage[key] = args.get("value")
+            return True
+    if not message.spec.get("eval"):
+        return False
     data = None
     if "localStorage.getItem" in code:
         data = local_storage.get(str(args.get("key", "")))
@@ -180,6 +186,11 @@ def handle_pywebio_client_eval(ws, message, local_storage=None):
         data = "visible"
     send_js_yield_event(ws, message.task_id, data)
     return True
+
+
+def handle_pywebio_client_eval(ws, message, local_storage=None):
+    """处理 PyWebIO 需要浏览器执行并回传的脚本。"""
+    return handle_pywebio_client_script(ws, message, local_storage=local_storage)
 
 
 def extract_instance_names(state):
@@ -278,6 +289,39 @@ def _searchable_text(value):
     return str(value or "")
 
 
+def _iter_button_groups(value):
+    """递归遍历 PyWebIO 输出里的按钮组。"""
+    if isinstance(value, dict):
+        buttons = value.get("buttons")
+        callback_id = str(value.get("callback_id", "") or value.get("callback", "") or "")
+        if isinstance(buttons, list):
+            yield callback_id, buttons
+        for item in value.values():
+            yield from _iter_button_groups(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _iter_button_groups(item)
+
+
+def find_button_callback(state, label, scope_keyword=""):
+    """按精确按钮标签查找回调 ID 与按钮值。"""
+    expected = str(label or "")
+    for output in state.outputs:
+        scope = str(output.get("scope", "") if isinstance(output, dict) else "")
+        if scope_keyword and scope_keyword not in scope:
+            continue
+        for group_callback_id, buttons in _iter_button_groups(output):
+            for button in buttons:
+                if not isinstance(button, dict):
+                    continue
+                if str(button.get("label", "") or "") != expected:
+                    continue
+                callback_id = str(button.get("callback_id", "") or button.get("callback", "") or group_callback_id)
+                if callback_id:
+                    return callback_id, button.get("value")
+    raise NavigationError(f"button_callback_not_found:{expected}")
+
+
 def find_navigation_callback(state, target):
     """查找导航到目标页面的回调 ID。"""
     keywords = NAVIGATION_KEYWORDS.get(target, ())
@@ -301,24 +345,34 @@ def find_navigation_callback(state, target):
 
 
 def find_update_action_callback(state, action):
-    """查找更新器动作回调 ID。"""
+    """查找更新器动作回调 ID 与按钮值。"""
     keywords = UPDATE_ACTION_KEYWORDS.get(action, ())
+    for keyword in keywords:
+        try:
+            return find_button_callback(state, keyword)
+        except NavigationError:
+            continue
     for output in state.outputs:
         text = _searchable_text(output)
         lower_text = text.lower()
         if any(keyword.lower() in lower_text for keyword in keywords):
             callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
             if callback_id:
-                return callback_id
+                return callback_id, None
             callback_id = _search_callback_id(output) or _search_callback_id(text)
             if callback_id:
-                return callback_id
+                return callback_id, None
     raise NavigationError(f"update_action_callback_not_found:{action}")
 
 
 def find_config_action_callback(state, action):
-    """查找配置启动或停止按钮回调 ID。"""
+    """查找配置启动或停止按钮回调 ID 与按钮值。"""
     keywords = CONFIG_ACTION_KEYWORDS.get(action, ())
+    for keyword in keywords:
+        try:
+            return find_button_callback(state, keyword)
+        except NavigationError:
+            continue
     for output in state.outputs:
         text = _searchable_text(output)
         lower_text = text.lower()
@@ -326,10 +380,10 @@ def find_config_action_callback(state, action):
             continue
         callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
         if callback_id:
-            return callback_id
+            return callback_id, None
         callback_id = _search_callback_id(output) or _search_callback_id(text)
         if callback_id:
-            return callback_id
+            return callback_id, None
     raise NavigationError(f"config_action_callback_not_found:{action}")
 
 
@@ -385,8 +439,106 @@ def collect_initial_state(ws, max_messages=1200, local_storage=None):
             continue
         message = parse_pywebio_message(payload)
         state.apply_message(message)
-        handle_pywebio_client_eval(ws, message, local_storage=local_storage)
+        handle_pywebio_client_script(ws, message, local_storage=local_storage)
     return state
+
+
+def set_websocket_timeout(ws, timeout):
+    """设置 WebSocket 接收超时，避免持续日志导致控制流程阻塞。"""
+    try:
+        ws.settimeout(timeout)
+    except AttributeError:
+        pass
+
+
+def collect_state_until_buttons(ws, labels, max_messages=300, local_storage=None):
+    """收集 PyWebIO 状态直到出现任一目标按钮。"""
+    state = PyWebIOState()
+    expected_labels = tuple(str(label or "") for label in labels)
+    for _ in range(max_messages):
+        try:
+            payload = ws.recv()
+        except WEBSOCKET_TIMEOUT_ERRORS:
+            break
+        if not payload:
+            continue
+        message = parse_pywebio_message(payload)
+        state.apply_message(message)
+        handle_pywebio_client_script(ws, message, local_storage=local_storage)
+        for label in expected_labels:
+            try:
+                find_button_callback(state, label)
+                return state
+            except NavigationError:
+                continue
+    return state
+
+
+def _click_button_if_present(ws, state, label, scope_keyword=""):
+    """如果指定按钮存在则点击并返回是否已点击。"""
+    try:
+        callback_id, value = find_button_callback(state, label, scope_keyword=scope_keyword)
+    except NavigationError:
+        return False
+    send_callback_event(ws, "", callback_id, value)
+    return True
+
+
+def prepare_alas_page(ws, config_name, local_storage):
+    """初始化 ALAS PyWebIO 页面并选中目标配置。"""
+    state = collect_initial_state(ws, local_storage=local_storage)
+    instance_outputs = [
+        output for output in state.outputs
+        if isinstance(output, dict) and "pywebio-scope-alas-instance-" in str(output.get("scope", ""))
+    ]
+    if _click_button_if_present(ws, state, "简体中文"):
+        state = collect_initial_state(ws, local_storage=local_storage)
+        instance_outputs.extend(
+            output for output in state.outputs
+            if isinstance(output, dict) and "pywebio-scope-alas-instance-" in str(output.get("scope", ""))
+        )
+    for label in ("深色", "Dark", "黑暗"):
+        if _click_button_if_present(ws, state, label):
+            state = collect_initial_state(ws, local_storage=local_storage)
+            instance_outputs.extend(
+                output for output in state.outputs
+                if isinstance(output, dict) and "pywebio-scope-alas-instance-" in str(output.get("scope", ""))
+            )
+            break
+    if config_name:
+        try:
+            callback_id, value = find_button_callback(state, config_name, scope_keyword="alas-instance-")
+            send_callback_event(ws, "", callback_id, value)
+            labels = CONFIG_ACTION_KEYWORDS.get("stop", ()) + CONFIG_ACTION_KEYWORDS.get("start", ())
+            next_state = collect_state_until_buttons(ws, labels, max_messages=300, local_storage=local_storage)
+            if next_state.outputs:
+                if instance_outputs:
+                    next_state.outputs = instance_outputs + next_state.outputs
+                state = next_state
+        except NavigationError:
+            pass
+    return state
+
+
+def post_update_action(config, action="check"):
+    """通过 WebSocket 点击 ALAS 更新器动作。"""
+    if action not in UPDATE_ACTION_KEYWORDS:
+        raise WebSocketHijackError("unsupported_update_action")
+    ws = open_pywebio_websocket(config)
+    try:
+        current_config = str(config.get("current_config", "") or "")
+        local_storage = {"aside": current_config or None}
+        state = prepare_alas_page(ws, current_config, local_storage)
+        _click_button_if_present(ws, state, "更新器")
+        state = collect_initial_state(ws, local_storage=local_storage)
+        callback_id, value = find_update_action_callback(state, action)
+        send_callback_event(ws, "", callback_id, value)
+        return {"action": action, "status": "submitted"}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
 
 
 def open_pywebio_websocket(config, timeout=5.0):
@@ -399,6 +551,7 @@ def open_pywebio_websocket(config, timeout=5.0):
             timeout=timeout,
             enable_multithread=True,
         )
+        set_websocket_timeout(ws, timeout)
         return ws
     except Exception as exc:
         raise WebSocketHandshakeError(str(exc)) from exc
@@ -445,8 +598,47 @@ def get_status_all(config):
 
 def post_config_action(config, config_name, action):
     """通过 WebSocket 对指定配置执行启动或停止。"""
-    _ = config
-    _ = config_name
     if action not in {"start", "stop"}:
         raise WebSocketHijackError("unsupported_action")
-    raise WebSocketHijackError("websocket_action_not_implemented")
+    home_error = None
+    try:
+        check_pywebio_home(config)
+    except Exception as exc:
+        home_error = exc
+    try:
+        ws = open_pywebio_websocket(config)
+    except Exception:
+        if home_error:
+            raise home_error
+        raise
+    try:
+        identify_storage = {}
+        state = prepare_alas_page(ws, "", identify_storage)
+        configs = extract_instance_names(state)
+        if config_name not in configs:
+            raise ConfigDetectionError("config_not_found")
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+    ws = open_pywebio_websocket(config)
+    set_websocket_timeout(ws, 0.5)
+    try:
+        local_storage = dict(identify_storage)
+        local_storage["aside"] = str(config_name or "")
+        state = collect_state_until_buttons(
+            ws,
+            CONFIG_ACTION_KEYWORDS.get(action, ()),
+            max_messages=1500,
+            local_storage=local_storage,
+        )
+        callback_id, value = find_config_action_callback(state, action)
+        send_callback_event(ws, "", callback_id, value)
+        status = "running" if action == "start" else "idle"
+        return {"config": config_name, "status": status}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
