@@ -445,31 +445,8 @@ def get_status_all(config):
 
 def post_config_action(config, config_name, action):
     """通过 WebSocket 对指定配置执行启动或停止。"""
+    _ = config
+    _ = config_name
     if action not in {"start", "stop"}:
         raise WebSocketHijackError("unsupported_action")
-    home_error = None
-    try:
-        check_pywebio_home(config)
-    except Exception as exc:
-        home_error = exc
-    try:
-        ws = open_pywebio_websocket(config)
-    except Exception:
-        if home_error:
-            raise home_error
-        raise
-    try:
-        local_storage = {"aside": str(config_name or config.get("current_config", "") or "") or None}
-        state = collect_initial_state(ws, local_storage=local_storage)
-        configs = extract_instance_names(state)
-        if config_name not in configs:
-            raise ConfigDetectionError("config_not_found")
-        callback_id = find_config_action_callback(state, action)
-        send_callback_event(ws, "", callback_id)
-        status = "running" if action == "start" else "idle"
-        return {"config": config_name, "status": status}
-    finally:
-        try:
-            ws.close()
-        except Exception:
-            pass
+    raise WebSocketHijackError("websocket_action_not_implemented")
