@@ -30,7 +30,7 @@ def should_fallback_to_websocket(mode, status_code=None, error=None):
     """判断 Overlay 失败后是否应降级 WebSocket。"""
     if not should_try_websocket_after_overlay_failure(mode):
         return False
-    if error is not None:
+    if error:
         return True
     return status_code in {0, 404, 408, 500, 502, 503, 504}
 
