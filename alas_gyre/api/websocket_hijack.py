@@ -103,6 +103,44 @@ class PyWebIOState:
             self.inputs.append(message.spec)
 
 
+@dataclass
+class SchedulerButtonSet:
+    """调度器启动和停止按钮缓存。"""
+
+    start_callback_id: str = ""
+    start_value: object = None
+    stop_callback_id: str = ""
+    stop_value: object = None
+
+
+@dataclass
+class PersistentConfigWorker:
+    """常驻配置状态缓存。"""
+
+    config: dict
+    config_name: str
+    buttons: SchedulerButtonSet = field(default_factory=SchedulerButtonSet)
+    status: str = "error"
+    last_error: str = ""
+
+    def update_from_state(self, state):
+        """从 PyWebIO 状态更新按钮和实例状态缓存。"""
+        try:
+            callback_id, value = find_config_action_callback(state, "start")
+            self.buttons.start_callback_id = callback_id
+            self.buttons.start_value = value
+        except NavigationError:
+            pass
+        try:
+            callback_id, value = find_config_action_callback(state, "stop")
+            self.buttons.stop_callback_id = callback_id
+            self.buttons.stop_value = value
+        except NavigationError:
+            pass
+        status_data = extract_status_all(state, [self.config_name])
+        self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
+
+
 def parse_pywebio_message(payload):
     """解析 PyWebIO JSON 消息。"""
     data = json.loads(payload)
