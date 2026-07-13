@@ -404,6 +404,34 @@ QLineEdit#settingsInput:focus {
     background-color: #ffffff;
     border: 1px solid #10b981;
 }
+QComboBox#settingsInput {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #0f172a;
+    padding: 0px 28px 0px 10px;
+    font-size: 13px;
+    selection-background-color: #a7f3d0;
+}
+QComboBox#settingsInput:hover {
+    background-color: #f8fafc;
+    border: 1px solid #94a3b8;
+}
+QComboBox#settingsInput:focus {
+    background-color: #ffffff;
+    border: 1px solid #10b981;
+}
+QComboBox#settingsInput::drop-down {
+    border: none;
+    width: 24px;
+}
+QComboBox#settingsInput QAbstractItemView {
+    background-color: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    selection-background-color: #a7f3d0;
+    font-size: 13px;
+}
 
 /* 复选框 */
 QCheckBox {

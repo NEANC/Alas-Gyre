@@ -170,6 +170,7 @@ class SettingsWindow(QDialog):
         self.connectionModeCombo = QComboBox()
         self.connectionModeCombo.setObjectName("settingsInput")
         self.connectionModeCombo.setFixedHeight(30)
+        self.connectionModeCombo.setFixedWidth(172)
         self.connectionModeCombo.addItem(tr("connection_mode_overlay"), "overlay")
         self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
         self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
