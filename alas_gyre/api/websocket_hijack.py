@@ -186,6 +186,9 @@ def find_update_action_callback(state, action):
             callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
             if callback_id:
                 return callback_id
+            callback_id = _search_callback_id(output) or _search_callback_id(text)
+            if callback_id:
+                return callback_id
     raise NavigationError(f"update_action_callback_not_found:{action}")
 
 
