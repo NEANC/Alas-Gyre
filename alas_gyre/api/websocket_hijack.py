@@ -252,11 +252,6 @@ def collect_initial_state(ws, max_messages=1200):
             continue
         message = parse_pywebio_message(payload)
         state.apply_message(message)
-        try:
-            extract_config_names(state)
-            return state
-        except ConfigDetectionError:
-            continue
     return state
 
 
