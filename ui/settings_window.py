@@ -789,6 +789,7 @@ class SettingsWindow(QDialog):
             return
         ip = self.ipInput.text().strip()
         port_str = self.portInput.text().strip()
+        connection_mode = self.connectionModeCombo.currentData() or CONNECTION_MODE_AUTO
         
         if not ip or not port_str.isdigit():
             self._on_test_result(False, tr("test_invalid"))
@@ -803,11 +804,11 @@ class SettingsWindow(QDialog):
         
         threading.Thread(
             target=self._test_api,
-            args=(ip, port_str, self.tokenInput.text().strip()),
+            args=(ip, port_str, self.tokenInput.text().strip(), connection_mode),
             daemon=True,
         ).start()
 
-    def _test_api(self, ip, port, token):
+    def _test_api(self, ip, port, token, connection_mode):
         success = False
         message = ""
         try:
@@ -815,7 +816,7 @@ class SettingsWindow(QDialog):
                 "ip": ip,
                 "port": port,
                 "api_token": token,
-                "connection_mode": self.connectionModeCombo.currentData() or CONNECTION_MODE_AUTO,
+                "connection_mode": connection_mode,
             }
             result = test_connection(test_config, timeout=3.0)
             success = result.ok
