@@ -137,8 +137,9 @@ class PersistentConfigWorker:
             self.buttons.stop_value = value
         except NavigationError:
             pass
-        status_data = extract_status_all(state, [self.config_name])
-        self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
+        if _has_status_evidence(state):
+            status_data = extract_status_all(state, [self.config_name])
+            self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
 
 
 def parse_pywebio_message(payload):
@@ -244,6 +245,22 @@ def extract_instance_names(state):
     if not names:
         return extract_config_names(state)
     return names
+
+
+def _has_status_evidence(state):
+    """判断 PyWebIO 状态中是否包含可用于更新实例状态的证据。"""
+    status_texts = ("运行中", "空闲", "未连接", "错误", "更新中")
+    status_icons = ("icon-run", "icon-stop", "icon-idle", "icon-error")
+    for output in state.outputs:
+        text = _searchable_text(output)
+        scope = str(output.get("scope", "") if isinstance(output, dict) else "")
+        if "header_status" in scope or "pywebio-scope-header_status" in text:
+            return True
+        if any(status_icon in text for status_icon in status_icons):
+            return True
+        if any(status_text in text for status_text in status_texts):
+            return True
+    return False
 
 
 def extract_status_all(state, configs=None):
