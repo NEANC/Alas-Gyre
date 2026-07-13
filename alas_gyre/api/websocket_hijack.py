@@ -14,6 +14,15 @@ CONFIG_PIN_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)_[A-Za-z0-9]+_")
 IGNORED_PIN_PREFIXES = {
     "General",
 }
+NAVIGATION_KEYWORDS = {
+    "remote": ("remote", "远程控制"),
+    "updater": ("updater", "更新器"),
+}
+UPDATE_ACTION_KEYWORDS = {
+    "check": ("检查更新", "check update"),
+    "apply": ("进行更新", "update now", "apply update"),
+    "cancel": ("取消更新", "cancel update"),
+}
 try:
     import websocket
 
@@ -137,6 +146,57 @@ def normalize_alas_status(value):
     if text in {"disconnected", "未连接"}:
         return "disconnected"
     return "error"
+
+
+def _search_callback_id(text):
+    """从文本中提取 PyWebIO 回调 ID。"""
+    match = re.search(r"CB-[A-Za-z0-9_-]+", str(text or ""))
+    return match.group(0) if match else ""
+
+
+def find_navigation_callback(state, target):
+    """查找导航到目标页面的回调 ID。"""
+    keywords = NAVIGATION_KEYWORDS.get(target, ())
+    for script in state.scripts:
+        code = str(script.get("code", "") if isinstance(script, dict) else script)
+        lower_code = code.lower()
+        for keyword in keywords:
+            if keyword.lower() not in lower_code:
+                continue
+            callback_match = re.search(
+                rf"{re.escape(keyword)}.*?(CB-[A-Za-z0-9_-]+)",
+                code,
+                re.IGNORECASE,
+            )
+            if callback_match:
+                return callback_match.group(1)
+            callback_id = _search_callback_id(code)
+            if callback_id:
+                return callback_id
+    raise NavigationError(f"navigation_callback_not_found:{target}")
+
+
+def find_update_action_callback(state, action):
+    """查找更新器动作回调 ID。"""
+    keywords = UPDATE_ACTION_KEYWORDS.get(action, ())
+    for output in state.outputs:
+        text = str(output.get("content", "") if isinstance(output, dict) else output)
+        lower_text = text.lower()
+        if any(keyword.lower() in lower_text for keyword in keywords):
+            callback_id = str(output.get("callback_id", "") if isinstance(output, dict) else "")
+            if callback_id:
+                return callback_id
+    raise NavigationError(f"update_action_callback_not_found:{action}")
+
+
+def send_callback_event(ws, task_id, callback_id, data=None):
+    """向 PyWebIO 发送回调事件。"""
+    payload = {
+        "event": "callback",
+        "task_id": task_id,
+        "data": {"callback_id": callback_id, "data": data},
+    }
+    ws.send(json.dumps(payload))
 
 
 def webui_base_url(config):
