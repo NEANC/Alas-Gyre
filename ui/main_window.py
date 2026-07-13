@@ -223,7 +223,7 @@ class MainConfigRow(QWidget):
                     if self.main_card.current_config == self.config_name:
                         self.main_card.status_update_signal.emit(status, "")
                     if result.degraded:
-                        self.main_card.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
+                        self.main_card._notify_websocket_degraded_once()
                 else:
                     self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
                 time.sleep(0.5)
@@ -292,6 +292,7 @@ class CardWidget(QFrame):
         self._poll_lock = threading.Lock()
         self._statuses = {}
         self._tasks = {}
+        self.websocket_degraded_notified = False
         self.rows = {}
 
         self._config_idx = 0
@@ -407,6 +408,13 @@ class CardWidget(QFrame):
         except Exception as e:
             print(f"[Error] Failed to write {self.config_path}: {e}")
             return False
+
+    def _notify_websocket_degraded_once(self):
+        """提示用户已降级到 WebSocket 模式。"""
+        if self.websocket_degraded_notified:
+            return
+        self.websocket_degraded_notified = True
+        self.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
 
     def apply_task_display_settings(self):
         for row in self.rows.values():
@@ -624,11 +632,11 @@ class CardWidget(QFrame):
                 if isinstance(configs, list) and configs:
                     self.configs_update_signal.emit(configs)
                 if result.degraded:
-                    self.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
+                    self._notify_websocket_degraded_once()
             else:
                 self.control_error_signal.emit("configs", tr("control_connect_failed"))
         except Exception:
-            pass
+            self.status_update_signal.emit("disconnected", "")
         finally:
             with self._poll_lock:
                 self._configs_fetching = False
@@ -707,7 +715,7 @@ class CardWidget(QFrame):
                 current_task = tasks.get(self.current_config, "")
                 self.status_update_signal.emit(current_status, current_task)
                 if result.degraded:
-                    self.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
+                    self._notify_websocket_degraded_once()
             else:
                 self.status_update_signal.emit("disconnected", "")
         except Exception:
