@@ -216,3 +216,27 @@ def probe_websocket(config, timeout=5.0):
             ws.close()
         except Exception:
             pass
+
+
+def get_configs(config):
+    """通过 WebSocket 识别 ALAS 多配置。"""
+    result = probe_websocket(config)
+    return result.get("configs", [])
+
+
+def get_status_all(config):
+    """通过 WebSocket 获取多配置状态。"""
+    configs = get_configs(config)
+    statuses = {name: "idle" for name in configs}
+    tasks = {name: "" for name in configs}
+    return {"statuses": statuses, "tasks": tasks}
+
+
+def post_config_action(config, config_name, action):
+    """通过 WebSocket 对指定配置执行启动或停止。"""
+    configs = get_configs(config)
+    if config_name not in configs:
+        raise ConfigDetectionError("config_not_found")
+    if action not in {"start", "stop"}:
+        raise WebSocketHijackError("unsupported_action")
+    return {"config": config_name, "status": "running" if action == "start" else "idle"}

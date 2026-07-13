@@ -9,6 +9,9 @@ import threading
 import time
 
 from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.control_gateway import get_configs as gateway_get_configs
+from alas_gyre.api.control_gateway import get_status_all as gateway_get_status_all
+from alas_gyre.api.control_gateway import post_action as gateway_post_action
 from alas_gyre.core.paths import (
     app_base_dir as app_base_dir, asset_path, config_path,
 )
@@ -209,21 +212,20 @@ class MainConfigRow(QWidget):
 
         def send_req():
             try:
-                url = gyre_api_url(self.main_card.config, action)
-                resp = api_request("POST",
-                    url,
-                    params={"config": self.config_name},
-                    headers=api_headers(self.main_card.config),
-                    timeout=3,
+                result = gateway_post_action(
+                    self.main_card.config,
+                    self.config_name,
+                    action,
                 )
-                if resp.status_code == 200:
-                    status = normalize_status(resp.json().get("status", "idle"))
+                if result.ok:
+                    status = normalize_status(result.data.get("status", "idle"))
                     self.main_card.status_all_update_signal.emit({self.config_name: status}, {self.config_name: ""})
                     if self.main_card.current_config == self.config_name:
                         self.main_card.status_update_signal.emit(status, "")
+                    if result.degraded:
+                        self.main_card.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
                 else:
-                    message = self.main_card.format_control_http_error(resp)
-                    self.main_card.control_error_signal.emit(action, message)
+                    self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
                 time.sleep(0.5)
                 self.main_card._start_poll_thread()
             except Exception as e:
@@ -259,6 +261,7 @@ class CardWidget(QFrame):
             "auto_start": False,
             "always_on_top": False,
             "api_token": "",
+            "connection_mode": "auto",
             "mini_click_through": False,
             "show_task_name": False,
             "mini_opacity": 100,
@@ -615,13 +618,15 @@ class CardWidget(QFrame):
 
     def _fetch_configs_task(self):
         try:
-            url = gyre_api_url(self.config, "configs")
-            resp = api_request("GET", url, headers=api_headers(self.config), timeout=2.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                configs = data.get("configs", ["alas"])
+            result = gateway_get_configs(self.config)
+            if result.ok:
+                configs = result.data.get("configs", ["alas"])
                 if isinstance(configs, list) and configs:
                     self.configs_update_signal.emit(configs)
+                if result.degraded:
+                    self.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
+            else:
+                self.control_error_signal.emit("configs", tr("control_connect_failed"))
         except Exception:
             pass
         finally:
@@ -686,10 +691,9 @@ class CardWidget(QFrame):
             delattr(self, "_configs_fetched")
 
         try:
-            url = gyre_api_url(self.config, "status_all")
-            resp = api_request("GET", url, headers=api_headers(self.config), timeout=1.5)
-            if resp.status_code == 200:
-                data = resp.json()
+            result = gateway_get_status_all(self.config)
+            if result.ok:
+                data = result.data
                 statuses = {
                     str(config_name): normalize_status(status)
                     for config_name, status in data.get("statuses", {}).items()
@@ -702,30 +706,8 @@ class CardWidget(QFrame):
                 current_status = statuses.get(self.current_config, "idle")
                 current_task = tasks.get(self.current_config, "")
                 self.status_update_signal.emit(current_status, current_task)
-            elif resp.status_code == 404:
-                statuses = {}
-                tasks = {}
-                for config_name in self._configs:
-                    try:
-                        url = gyre_api_url(self.config, "status")
-                        resp2 = api_request("GET",
-                            url,
-                            params={"config": config_name},
-                            headers=api_headers(self.config),
-                            timeout=1.5,
-                        )
-                        if resp2.status_code == 200:
-                            j = resp2.json()
-                            statuses[config_name] = normalize_status(j.get("status", "idle"))
-                            tasks[config_name] = j.get("task", "")
-                        else:
-                            statuses[config_name] = "disconnected"
-                            tasks[config_name] = ""
-                    except Exception:
-                        statuses[config_name] = "disconnected"
-                        tasks[config_name] = ""
-                self.status_all_update_signal.emit(statuses, tasks)
-                self.status_update_signal.emit(statuses.get(self.current_config, "disconnected"), tasks.get(self.current_config, ""))
+                if result.degraded:
+                    self.control_error_signal.emit("degraded", tr("websocket_degraded_notice"))
             else:
                 self.status_update_signal.emit("disconnected", "")
         except Exception:

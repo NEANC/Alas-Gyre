@@ -12,6 +12,7 @@ from alas_gyre.api.connection_mode import normalize_connection_mode
 from alas_gyre.api.connection_mode import should_try_overlay
 from alas_gyre.api.connection_mode import should_try_websocket_after_overlay_failure
 from alas_gyre.api.connection_mode import should_try_websocket_first
+from alas_gyre.api import websocket_hijack
 from alas_gyre.api.websocket_hijack import probe_websocket
 
 
@@ -78,4 +79,68 @@ def test_connection(config, timeout=3.0):
     if should_fallback_to_websocket(mode, overlay_status, overlay_error):
         return test_websocket_connection(config, timeout=timeout, degraded=True)
 
+    return ControlResult(ok=False, mode=mode, message="connect_failed")
+
+
+def get_configs(config):
+    """按连接模式获取配置列表。"""
+    mode = normalize_connection_mode(config)
+    if should_try_websocket_first(mode):
+        return ControlResult(ok=True, mode="websocket", data={"configs": websocket_hijack.get_configs(config)})
+    try:
+        resp = api_request("GET", gyre_api_url(config, "configs"), headers=api_headers(config), timeout=2.0)
+        if resp.status_code == 200:
+            return ControlResult(ok=True, mode="overlay", data=resp.json())
+        overlay_status = resp.status_code
+        overlay_error = None
+    except Exception as exc:
+        overlay_status = None
+        overlay_error = exc
+    if should_fallback_to_websocket(mode, overlay_status, overlay_error):
+        configs = websocket_hijack.get_configs(config)
+        return ControlResult(ok=True, mode="websocket", degraded=True, data={"configs": configs})
+    return ControlResult(ok=False, mode=mode, message="connect_failed")
+
+
+def get_status_all(config):
+    """按连接模式获取全部状态。"""
+    mode = normalize_connection_mode(config)
+    if should_try_websocket_first(mode):
+        return ControlResult(ok=True, mode="websocket", data=websocket_hijack.get_status_all(config))
+    try:
+        resp = api_request("GET", gyre_api_url(config, "status_all"), headers=api_headers(config), timeout=1.5)
+        if resp.status_code == 200:
+            return ControlResult(ok=True, mode="overlay", data=resp.json())
+        overlay_status = resp.status_code
+        overlay_error = None
+    except Exception as exc:
+        overlay_status = None
+        overlay_error = exc
+    if should_fallback_to_websocket(mode, overlay_status, overlay_error):
+        return ControlResult(ok=True, mode="websocket", degraded=True, data=websocket_hijack.get_status_all(config))
+    return ControlResult(ok=False, mode=mode, message="connect_failed")
+
+
+def post_action(config, config_name, action):
+    """按连接模式启动或停止配置。"""
+    mode = normalize_connection_mode(config)
+    if should_try_websocket_first(mode):
+        return ControlResult(ok=True, mode="websocket", data=websocket_hijack.post_config_action(config, config_name, action))
+    try:
+        resp = api_request(
+            "POST",
+            gyre_api_url(config, action),
+            params={"config": config_name},
+            headers=api_headers(config),
+            timeout=3,
+        )
+        if resp.status_code == 200:
+            return ControlResult(ok=True, mode="overlay", data=resp.json())
+        overlay_status = resp.status_code
+        overlay_error = None
+    except Exception as exc:
+        overlay_status = None
+        overlay_error = exc
+    if should_fallback_to_websocket(mode, overlay_status, overlay_error):
+        return ControlResult(ok=True, mode="websocket", degraded=True, data=websocket_hijack.post_config_action(config, config_name, action))
     return ControlResult(ok=False, mode=mode, message="connect_failed")
