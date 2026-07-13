@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
+    QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
     QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
@@ -7,8 +7,16 @@ from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
 import secrets
 import threading
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_mode import CONNECTION_MODE_AUTO, normalize_connection_mode
+from alas_gyre.api.control_gateway import test_connection
 from alas_gyre.api.runtime_update import DEFAULT_RUNTIME_UPDATE_PORT, update_remote_runtime
+from alas_gyre.api.websocket_hijack import (
+    ConfigDetectionError,
+    NavigationError,
+    NotPyWebIOError,
+    WebSocketHandshakeError,
+    WebUIUnavailableError,
+)
 from alas_gyre.services.updater import check_for_updates, do_update
 from alas_gyre.core.version import get_current_version
 from alas_gyre.core.paths import config_path
@@ -150,6 +158,27 @@ class SettingsWindow(QDialog):
         opacity_layout.addWidget(opacity_label)
         opacity_layout.addWidget(self.miniOpacitySlider, stretch=1)
         opacity_layout.addWidget(self.miniOpacityValue)
+
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(10)
+        mode_label = QLabel(tr("connection_mode"))
+        mode_label.setObjectName("formLabel")
+        mode_label.setFixedWidth(104)
+        self.connectionModeCombo = QComboBox()
+        self.connectionModeCombo.setObjectName("settingsInput")
+        self.connectionModeCombo.setFixedHeight(30)
+        self.connectionModeCombo.addItem(tr("connection_mode_overlay"), "overlay")
+        self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
+        self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
+        current_mode = normalize_connection_mode(self.config)
+        index = self.connectionModeCombo.findData(current_mode)
+        self.connectionModeCombo.setCurrentIndex(index if index >= 0 else self.connectionModeCombo.findData(CONNECTION_MODE_AUTO))
+        mode_hint = QLabel(tr("connection_mode_hint"))
+        mode_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        mode_hint.setWordWrap(True)
+        mode_layout.addWidget(mode_label)
+        mode_layout.addWidget(self.connectionModeCombo)
+        mode_layout.addWidget(mode_hint, stretch=1)
 
         # IP 布局
         ip_layout = QHBoxLayout()
@@ -372,6 +401,7 @@ class SettingsWindow(QDialog):
         connection_panel_layout = QVBoxLayout(connection_panel)
         connection_panel_layout.setContentsMargins(14, 14, 14, 14)
         connection_panel_layout.setSpacing(12)
+        connection_panel_layout.addLayout(mode_layout)
         connection_panel_layout.addLayout(ip_layout)
         connection_panel_layout.addLayout(port_layout)
         connection_panel_layout.addLayout(runtime_port_layout)
@@ -703,6 +733,8 @@ class SettingsWindow(QDialog):
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
+        if hasattr(self, "connectionModeCombo"):
+            self.config["connection_mode"] = self.connectionModeCombo.currentData() or CONNECTION_MODE_AUTO
         runtime_port = self.runtimePortInput.text().strip()
         self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
         self.config["api_token"] = self.tokenInput.text().strip()
@@ -717,6 +749,11 @@ class SettingsWindow(QDialog):
         self.portInput.setText(str(self.config.get("port", "22267")))
         self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         self.tokenInput.setText(self.config.get("api_token", ""))
+        if hasattr(self, "connectionModeCombo"):
+            mode_index = self.connectionModeCombo.findData(normalize_connection_mode(self.config))
+            self.connectionModeCombo.setCurrentIndex(
+                mode_index if mode_index >= 0 else self.connectionModeCombo.findData(CONNECTION_MODE_AUTO)
+            )
 
     def _open_init_setup(self):
         self._sync_config_from_ui()
@@ -778,20 +815,29 @@ class SettingsWindow(QDialog):
                 "ip": ip,
                 "port": port,
                 "api_token": token,
+                "connection_mode": self.connectionModeCombo.currentData() or CONNECTION_MODE_AUTO,
             }
-            resp = api_request(
-                "GET",
-                gyre_api_url(test_config, "health"),
-                headers=api_headers(test_config),
-                timeout=2.0,
-            )
-            success = resp.status_code == 200
-            if resp.status_code == 401:
-                message = tr("test_unauthorized")
-            elif resp.status_code == 404:
-                message = tr("test_overlay_missing")
-            elif not success:
-                message = f"HTTP {resp.status_code}"
+            result = test_connection(test_config, timeout=3.0)
+            success = result.ok
+            if success and result.mode == "websocket":
+                count = len(result.data.get("configs", []))
+                message = tr("websocket_test_success", count=count)
+                if result.degraded:
+                    message = tr("websocket_degraded_notice") + "\n" + message
+            elif success:
+                message = tr("test_success")
+            else:
+                message = tr("test_failed")
+        except WebUIUnavailableError:
+            message = tr("websocket_webui_unavailable")
+        except NotPyWebIOError:
+            message = tr("websocket_not_pywebio")
+        except WebSocketHandshakeError:
+            message = tr("websocket_handshake_failed")
+        except ConfigDetectionError:
+            message = tr("websocket_config_detection_failed")
+        except NavigationError:
+            message = tr("websocket_navigation_failed")
         except Exception as exc:
             message = str(exc)
         self._emit_test_result(success, message)
