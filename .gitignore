@@ -34,3 +34,5 @@ gyre_runtime/
 *.pid
 input*.txt
 /mock_server.py
+/.trae/
+docs/superpowers/
