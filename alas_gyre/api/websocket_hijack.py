@@ -14,6 +14,13 @@ CONFIG_PIN_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)_[A-Za-z0-9]+_")
 IGNORED_PIN_PREFIXES = {
     "General",
 }
+try:
+    import websocket
+
+    WebSocketTimeoutException = websocket.WebSocketTimeoutException
+except Exception:
+    WebSocketTimeoutException = TimeoutError
+WEBSOCKET_TIMEOUT_ERRORS = (TimeoutError, WebSocketTimeoutException)
 
 
 class WebSocketHijackError(Exception):
@@ -167,16 +174,15 @@ def collect_initial_state(ws, max_messages=1200):
     for _ in range(max_messages):
         try:
             payload = ws.recv()
-        except TimeoutError:
+        except WEBSOCKET_TIMEOUT_ERRORS:
             break
         if not payload:
             continue
         message = parse_pywebio_message(payload)
         state.apply_message(message)
         try:
-            configs = extract_config_names(state)
-            if len(configs) >= 2:
-                return state
+            extract_config_names(state)
+            return state
         except ConfigDetectionError:
             continue
     return state
