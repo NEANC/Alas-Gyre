@@ -92,6 +92,15 @@ def get_status_text(status):
     return tr(normalize_status(status))
 
 
+def build_config_status_lines(config_name, status, task="", show_task=False):
+    """构建配置行的名称行和状态详情行。"""
+    name = str(config_name or "")
+    status_text = get_status_text(status)
+    if show_task and task:
+        return name, f"{status_text} · {task}"
+    return name, status_text
+
+
 class MainConfigRow(QWidget):
     btn_enable_signal = Signal(bool)
 
@@ -115,21 +124,20 @@ class MainConfigRow(QWidget):
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
 
+        self.nameLabel = MarqueeLabel()
+        self.nameLabel.setObjectName("rowStatusLabel")
+        self.nameLabel.setAlignment(Qt.AlignVCenter)
+
         self.statusLabel = MarqueeLabel()
-        self.statusLabel.setObjectName("rowStatusLabel")
+        self.statusLabel.setObjectName("rowTaskLabel")
         self.statusLabel.setAlignment(Qt.AlignVCenter)
-
-        self.taskLabel = MarqueeLabel()
-        self.taskLabel.setObjectName("rowTaskLabel")
-        self.taskLabel.setAlignment(Qt.AlignVCenter)
-        font = self.taskLabel.font()
+        font = self.statusLabel.font()
         font.setPointSize(font.pointSize() - 2)
-        self.taskLabel.setFont(font)
-        self.taskLabel.setStyleSheet("color: #888888;")
-        self.taskLabel.hide()
+        self.statusLabel.setFont(font)
+        self.statusLabel.setStyleSheet("color: #888888;")
 
+        vbox.addWidget(self.nameLabel)
         vbox.addWidget(self.statusLabel)
-        vbox.addWidget(self.taskLabel)
 
         layout.addLayout(vbox, stretch=1)
 
@@ -160,18 +168,19 @@ class MainConfigRow(QWidget):
         self._refresh_label()
 
     def _refresh_label(self):
-        full_text = f"{self.config_name}: {get_status_text(self.current_status)}"
-        self.statusLabel.set_marquee_text(full_text)
-        if self._should_show_task():
-            self.taskLabel.set_marquee_text(self.current_task)
-        else:
-            self.taskLabel.set_marquee_text("")
+        name, detail = build_config_status_lines(
+            self.config_name,
+            self.current_status,
+            self.current_task,
+            self._should_show_task(),
+        )
+        self.nameLabel.set_marquee_text(name)
+        self.statusLabel.set_marquee_text(detail)
 
     def _should_show_task(self):
         return bool(self.current_task and self.main_card.config.get("show_task_name", False))
 
     def apply_task_display_setting(self):
-        self.taskLabel.setVisible(self._should_show_task())
         self._refresh_label()
 
     def update_status(self, status, task=""):
@@ -187,7 +196,6 @@ class MainConfigRow(QWidget):
         self.statusIndicator.setStatus(self.current_status)
         self.toggleBtn.set_status(self.current_status)
         self.deleteBtn.setEnabled(delete_enabled)
-        self.taskLabel.setVisible(self._should_show_task())
         self._refresh_label()
 
     def _on_delete_clicked(self):

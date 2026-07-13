@@ -148,6 +148,117 @@ def normalize_alas_status(value):
     return "error"
 
 
+def send_js_yield_event(ws, task_id, data=None):
+    """向 PyWebIO 回传浏览器脚本求值结果。"""
+    payload = {
+        "event": "js_yield",
+        "task_id": task_id,
+        "data": data,
+    }
+    ws.send(json.dumps(payload, ensure_ascii=False))
+
+
+def handle_pywebio_client_eval(ws, message, local_storage=None):
+    """处理 PyWebIO 需要浏览器执行并回传的脚本。"""
+    if message.command != "run_script":
+        return False
+    if not message.spec.get("eval"):
+        return False
+    code = str(message.spec.get("code", "") or "")
+    args = message.spec.get("args", {})
+    if not isinstance(args, dict):
+        args = {}
+    local_storage = local_storage or {}
+    data = None
+    if "localStorage.getItem" in code:
+        data = local_storage.get(str(args.get("key", "")))
+    elif "document.visibilityState" in code:
+        data = "visible"
+    send_js_yield_event(ws, message.task_id, data)
+    return True
+
+
+def extract_instance_names(state):
+    """从 ALAS 侧边栏输出中提取实例名称。"""
+    names = []
+    for output in state.outputs:
+        scope = str(output.get("scope", "") if isinstance(output, dict) else "")
+        if "pywebio-scope-alas-instance-" not in scope:
+            continue
+        for label in _extract_labels(output):
+            if label and label not in names:
+                names.append(label)
+    if not names:
+        return extract_config_names(state)
+    return names
+
+
+def extract_status_all(state, configs=None):
+    """从 ALAS 页面输出中提取所有实例状态。"""
+    configs = list(configs or extract_instance_names(state))
+    statuses = {config_name: "error" for config_name in configs}
+    status_text = ""
+    for output in state.outputs:
+        text = _searchable_text(output)
+        scope = str(output.get("scope", "") if isinstance(output, dict) else "")
+        if "header_status" in scope or "pywebio-scope-header_status" in text:
+            for candidate in ("运行中", "空闲", "未连接", "错误", "更新中"):
+                if candidate in text:
+                    status_text = candidate
+                    break
+        if status_text:
+            break
+    if status_text:
+        status = normalize_alas_status(status_text)
+        statuses = {config_name: status for config_name in configs}
+    else:
+        statuses.update(_extract_instance_icon_statuses(state))
+    return {
+        "statuses": statuses,
+        "tasks": {config_name: "" for config_name in configs},
+    }
+
+
+def _extract_instance_icon_statuses(state):
+    """从 ALAS 侧边栏图标 class 提取实例运行状态。"""
+    statuses = {}
+    for output in state.outputs:
+        scope = str(output.get("scope", "") if isinstance(output, dict) else "")
+        if "pywebio-scope-alas-instance-" not in scope:
+            continue
+        labels = _extract_labels(output)
+        if not labels:
+            continue
+        text = _searchable_text(output)
+        if "icon-run" in text:
+            status = "running"
+        elif "icon-stop" in text or "icon-idle" in text:
+            status = "idle"
+        elif "icon-error" in text:
+            status = "error"
+        else:
+            continue
+        statuses[labels[0]] = status
+    return statuses
+
+
+def _extract_labels(value):
+    """递归提取 PyWebIO 输出里的按钮标签。"""
+    labels = []
+    if isinstance(value, dict):
+        buttons = value.get("buttons")
+        if isinstance(buttons, list):
+            for button in buttons:
+                if isinstance(button, dict) and button.get("label"):
+                    labels.append(str(button.get("label")))
+        for item in value.values():
+            labels.extend(_extract_labels(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            labels.extend(_extract_labels(item))
+    return labels
+
+
 def _search_callback_id(text):
     """从文本中提取 PyWebIO 回调 ID。"""
     match = re.search(r"CB-[A-Za-z0-9_-]+", str(text or ""))
@@ -203,12 +314,13 @@ def find_update_action_callback(state, action):
 
 def send_callback_event(ws, task_id, callback_id, data=None):
     """向 PyWebIO 发送回调事件。"""
+    _ = task_id
     payload = {
         "event": "callback",
-        "task_id": task_id,
-        "data": {"callback_id": callback_id, "data": data},
+        "task_id": callback_id,
+        "data": data,
     }
-    ws.send(json.dumps(payload))
+    ws.send(json.dumps(payload, ensure_ascii=False))
 
 
 def webui_base_url(config):
@@ -240,7 +352,7 @@ def check_pywebio_home(config, timeout=3.0):
     return True
 
 
-def collect_initial_state(ws, max_messages=1200):
+def collect_initial_state(ws, max_messages=1200, local_storage=None):
     """从 WebSocket 收集初始 PyWebIO 状态。"""
     state = PyWebIOState()
     for _ in range(max_messages):
@@ -252,6 +364,7 @@ def collect_initial_state(ws, max_messages=1200):
             continue
         message = parse_pywebio_message(payload)
         state.apply_message(message)
+        handle_pywebio_client_eval(ws, message, local_storage=local_storage)
     return state
 
 
@@ -275,8 +388,9 @@ def probe_websocket(config, timeout=5.0):
     check_pywebio_home(config, timeout=timeout)
     ws = open_pywebio_websocket(config, timeout=timeout)
     try:
-        state = collect_initial_state(ws)
-        configs = extract_config_names(state)
+        local_storage = {"aside": str(config.get("current_config", "") or "") or None}
+        state = collect_initial_state(ws, local_storage=local_storage)
+        configs = extract_instance_names(state)
         return {"ok": True, "configs": configs, "state": state}
     finally:
         try:
@@ -293,8 +407,10 @@ def get_configs(config):
 
 def get_status_all(config):
     """通过 WebSocket 获取多配置状态。"""
-    get_configs(config)
-    raise WebSocketHijackError("websocket_status_not_implemented")
+    result = probe_websocket(config)
+    state = result.get("state")
+    configs = result.get("configs", [])
+    return extract_status_all(state, configs)
 
 
 def post_config_action(config, config_name, action):
