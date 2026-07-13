@@ -159,3 +159,54 @@ def check_pywebio_home(config, timeout=3.0):
     if not any(marker in html for marker in markers):
         raise NotPyWebIOError("not_pywebio")
     return True
+
+
+def collect_initial_state(ws, max_messages=1200):
+    """从 WebSocket 收集初始 PyWebIO 状态。"""
+    state = PyWebIOState()
+    for _ in range(max_messages):
+        try:
+            payload = ws.recv()
+        except TimeoutError:
+            break
+        if not payload:
+            continue
+        message = parse_pywebio_message(payload)
+        state.apply_message(message)
+        try:
+            configs = extract_config_names(state)
+            if len(configs) >= 2:
+                return state
+        except ConfigDetectionError:
+            continue
+    return state
+
+
+def open_pywebio_websocket(config, timeout=5.0):
+    """打开 ALAS PyWebIO WebSocket。"""
+    try:
+        import websocket
+
+        ws = websocket.create_connection(
+            websocket_url(config),
+            timeout=timeout,
+            enable_multithread=True,
+        )
+        return ws
+    except Exception as exc:
+        raise WebSocketHandshakeError(str(exc)) from exc
+
+
+def probe_websocket(config, timeout=5.0):
+    """验证 WebSocket 可连接且能识别多配置。"""
+    check_pywebio_home(config, timeout=timeout)
+    ws = open_pywebio_websocket(config, timeout=timeout)
+    try:
+        state = collect_initial_state(ws)
+        configs = extract_config_names(state)
+        return {"ok": True, "configs": configs, "state": state}
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
