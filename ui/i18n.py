@@ -57,7 +57,7 @@ TRANSLATIONS = {
         "connection_mode_overlay": "Overlay",
         "connection_mode_websocket": "WebSocket",
         "connection_mode_auto": "自动",
-        "connection_mode_hint": "Overlay 功能完整；WebSocket 无需 gyre_runtime；自动会优先 Overlay，失败后降级 WebSocket。",
+        "connection_mode_hint": "Overlay 功能完整；WebSocket 无需 gyre_runtime；Overlay/自动在 Overlay 失败后会降级 WebSocket。",
         "websocket_degraded_notice": "已降级到 WebSocket 劫持模式；如需恢复 Overlay，请检查 gyre_runtime 状态。",
         "websocket_test_success": "WebSocket 连接成功，已识别 {count} 个配置。",
         "websocket_webui_unavailable": "请先启动 ALAS WebUI。",

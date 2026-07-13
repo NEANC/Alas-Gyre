@@ -298,10 +298,8 @@ def get_configs(config):
 
 def get_status_all(config):
     """通过 WebSocket 获取多配置状态。"""
-    configs = get_configs(config)
-    statuses = {name: "idle" for name in configs}
-    tasks = {name: "" for name in configs}
-    return {"statuses": statuses, "tasks": tasks}
+    get_configs(config)
+    raise WebSocketHijackError("websocket_status_not_implemented")
 
 
 def post_config_action(config, config_name, action):
@@ -311,4 +309,4 @@ def post_config_action(config, config_name, action):
         raise ConfigDetectionError("config_not_found")
     if action not in {"start", "stop"}:
         raise WebSocketHijackError("unsupported_action")
-    return {"config": config_name, "status": "running" if action == "start" else "idle"}
+    raise WebSocketHijackError("websocket_action_not_implemented")

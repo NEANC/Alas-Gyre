@@ -21,6 +21,13 @@ from PySide6.QtWidgets import (
 from alas_gyre.api.connection_mode import CONNECTION_MODE_AUTO, normalize_connection_mode
 from alas_gyre.api.control_gateway import test_connection
 from alas_gyre.api.overlay_launcher import RUNTIME_DIR_NAME, generate_portable_overlay_launchers
+from alas_gyre.api.websocket_hijack import (
+    ConfigDetectionError,
+    NavigationError,
+    NotPyWebIOError,
+    WebSocketHandshakeError,
+    WebUIUnavailableError,
+)
 from alas_gyre.core.config import ensure_api_token, save_config
 from alas_gyre.core.paths import app_base_dir
 from .message_dialog import ask_confirm
@@ -585,6 +592,16 @@ class InitSetupWindow(QDialog):
                 message = tr("test_success")
             else:
                 message = tr("test_failed")
+        except WebUIUnavailableError:
+            message = tr("websocket_webui_unavailable")
+        except NotPyWebIOError:
+            message = tr("websocket_not_pywebio")
+        except WebSocketHandshakeError:
+            message = tr("websocket_handshake_failed")
+        except ConfigDetectionError:
+            message = tr("websocket_config_detection_failed")
+        except NavigationError:
+            message = tr("websocket_navigation_failed")
         except Exception as exc:
             message = str(exc)
         self.test_result_signal.emit(success, message)
