@@ -129,9 +129,10 @@ class PersistentConfigWorker:
     local_storage: dict = field(default_factory=dict)
 
     def __post_init__(self):
-        """初始化 stop_event（避免 dataclass field 共享可变默认值）。"""
+        """初始化 stop_event 和累积状态（避免 dataclass field 共享可变默认值）。"""
         if self.stop_event is None:
             self.stop_event = threading.Event()
+        self._accumulated_state = PyWebIOState()
 
     def update_from_state(self, state):
         """从 PyWebIO 状态更新按钮和实例状态缓存。"""
@@ -152,7 +153,7 @@ class PersistentConfigWorker:
             self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
 
     def read_once(self):
-        """从 WebSocket 接收一条消息，解析并更新状态缓存。"""
+        """从 WebSocket 接收一条消息，解析并累积更新状态缓存。"""
         payload = self.ws.recv()
         if not payload:
             return None
@@ -160,7 +161,8 @@ class PersistentConfigWorker:
         state = PyWebIOState()
         state.apply_message(message)
         handle_pywebio_client_script(self.ws, message, local_storage=self.local_storage)
-        self.update_from_state(state)
+        self._accumulated_state.apply_message(message)
+        self.update_from_state(self._accumulated_state)
         return message
 
     def read_loop_step(self):
@@ -182,7 +184,8 @@ class PersistentConfigWorker:
         current_config = str(self.config.get("current_config", "") or "")
         self.local_storage = {"aside": current_config or None}
         state = collect_initial_state(self.ws, local_storage=self.local_storage)
-        self.update_from_state(state)
+        self._accumulated_state = state
+        self.update_from_state(self._accumulated_state)
         self.stop_event.clear()
 
         def _reader_loop():
