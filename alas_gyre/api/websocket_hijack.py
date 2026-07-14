@@ -4,8 +4,10 @@
 from dataclasses import dataclass
 from dataclasses import field
 import json
+import logging
 import re
 import threading
+import traceback
 
 import requests
 
@@ -35,6 +37,8 @@ try:
 except Exception:
     WebSocketTimeoutException = TimeoutError
 WEBSOCKET_TIMEOUT_ERRORS = (TimeoutError, WebSocketTimeoutException, ConnectionResetError)
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketHijackError(Exception):
@@ -172,34 +176,41 @@ class PersistentConfigWorker:
             return True
         except WEBSOCKET_TIMEOUT_ERRORS:
             return True
-        except Exception as exc:
+        except Exception:
             self.status = "disconnected"
-            self.last_error = str(exc)
+            self.last_error = traceback.format_exc()
             return False
 
     def start_background_reader(self):
         """打开 WebSocket 连接并启动后台读取线程。"""
         self.ws = open_pywebio_websocket(self.config)
-        set_websocket_timeout(self.ws, 2.0)
-        current_config = str(self.config.get("current_config", "") or "")
-        self.local_storage = {"aside": current_config or None}
-        state = collect_initial_state(self.ws, local_storage=self.local_storage)
-        self._accumulated_state = state
-        self.update_from_state(self._accumulated_state)
-        self._navigate_to_config_page()
-        self.stop_event.clear()
+        try:
+            set_websocket_timeout(self.ws, 2.0)
+            current_config = str(self.config.get("current_config", "") or "")
+            self.local_storage = {"aside": current_config or None}
+            state = collect_initial_state(self.ws, local_storage=self.local_storage)
+            self._accumulated_state = state
+            self.update_from_state(self._accumulated_state)
+            self._navigate_to_config_page()
+            self.stop_event.clear()
 
-        def _reader_loop():
-            while not self.stop_event.is_set():
-                if not self.read_loop_step():
-                    break
+            def _reader_loop():
+                while not self.stop_event.is_set():
+                    if not self.read_loop_step():
+                        break
+                try:
+                    self.ws.close()
+                except Exception:
+                    pass
+
+            self.reader_thread = threading.Thread(target=_reader_loop, daemon=True)
+            self.reader_thread.start()
+        except Exception:
             try:
                 self.ws.close()
             except Exception:
                 pass
-
-        self.reader_thread = threading.Thread(target=_reader_loop, daemon=True)
-        self.reader_thread.start()
+            raise
 
     def _navigate_to_config_page(self):
         """点击侧边栏目标配置按钮，使页面显示该配置的调度器。"""
@@ -208,6 +219,7 @@ class PersistentConfigWorker:
                 self._accumulated_state, self.config_name, scope_keyword="alas-instance-"
             )
         except NavigationError:
+            logger.warning("导航至配置页面失败: config_name=%s", self.config_name)
             return
         send_callback_event(self.ws, "", callback_id, value)
         nav_state = collect_initial_state(self.ws, max_messages=300, local_storage=self.local_storage)
@@ -247,52 +259,83 @@ class PersistentConfigWorker:
 class WebSocketHijackManager:
     """WebSocket 常驻 worker 管理器。"""
 
+    _FINGERPRINT_KEY_FIELDS = ("ip", "port", "current_config")
+
     def __init__(self):
-        """初始化管理器，持有空 worker 字典。"""
+        """初始化管理器，持有空 worker 字典、线程锁和配置指纹。"""
         self.config = {}
         self.workers = {}
+        self._lock = threading.Lock()
+        self._config_fingerprint = None
+
+    @staticmethod
+    def _make_config_fingerprint(config):
+        """从配置关键字段计算指纹，用于判断配置是否变更。"""
+        items = tuple(
+            (k, str(config.get(k, "")))
+            for k in WebSocketHijackManager._FINGERPRINT_KEY_FIELDS
+        )
+        return hash(items)
 
     def ensure_started(self, config):
-        """根据配置检测结果创建或移除 PersistentConfigWorker 并启动后台 reader。"""
+        """根据配置检测结果创建或移除 PersistentConfigWorker 并启动后台 reader。
+
+        若配置指纹未变化且已有 worker，则跳过 HTTP+WS 探测直接返回。
+        """
         self.config = config
-        detected = get_configs(config)
-        for config_name in detected:
-            if config_name not in self.workers:
-                worker = PersistentConfigWorker(config, config_name)
-                self.workers[config_name] = worker
-                worker.start_background_reader()
-        stale = [name for name in self.workers if name not in detected]
-        for name in stale:
-            worker = self.workers.pop(name)
-            worker.stop_event.set()
-            if worker.reader_thread is not None:
-                worker.reader_thread.join(timeout=3)
+        fingerprint = self._make_config_fingerprint(config)
+
+        with self._lock:
+            if fingerprint == self._config_fingerprint and self.workers:
+                return self
+            detected = get_configs(config)
+            self._config_fingerprint = fingerprint
+            new_workers = {}
+            for config_name in detected:
+                if config_name not in self.workers:
+                    worker = PersistentConfigWorker(config, config_name)
+                    self.workers[config_name] = worker
+                    new_workers[config_name] = worker
+            stale = [name for name in list(self.workers.keys()) if name not in detected]
+            for name in stale:
+                worker = self.workers.pop(name)
+                worker.stop_event.set()
+                if worker.reader_thread is not None:
+                    worker.reader_thread.join(timeout=3)
+
+        for worker in new_workers.values():
+            worker.start_background_reader()
         return self
 
     def get_status_all(self):
         """遍历 workers 返回所有配置的状态和任务缓存。"""
-        statuses = {}
-        tasks = {}
-        for config_name, worker in self.workers.items():
-            statuses[config_name] = worker.status
-            tasks[config_name] = ""
-        return {"statuses": statuses, "tasks": tasks}
+        with self._lock:
+            statuses = {}
+            tasks = {}
+            for config_name, worker in self.workers.items():
+                statuses[config_name] = worker.status
+                tasks[config_name] = ""
+            return {"statuses": statuses, "tasks": tasks}
 
     def post_action(self, config_name, action):
         """从 workers 取指定配置的 worker 并发送动作。"""
-        worker = self.workers.get(config_name)
+        with self._lock:
+            worker = self.workers.get(config_name)
         if worker is None:
             raise WebSocketHijackError("config_not_found")
         return worker.post_action(action)
 
     def stop_all(self):
         """停止所有 worker 的后台读取线程并清空。"""
-        for worker in self.workers.values():
+        with self._lock:
+            workers_snapshot = list(self.workers.values())
+        for worker in workers_snapshot:
             worker.stop_event.set()
-        for worker in self.workers.values():
+        for worker in workers_snapshot:
             if worker.reader_thread is not None:
                 worker.reader_thread.join(timeout=3)
-        self.workers.clear()
+        with self._lock:
+            self.workers.clear()
 
 
 def parse_pywebio_message(payload):
