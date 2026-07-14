@@ -184,6 +184,7 @@ class WebSocketHijackManager:
         stale = [name for name in self.workers if name not in detected]
         for name in stale:
             self.workers.pop(name)
+        return self
 
     def get_status_all(self):
         """遍历 workers 返回所有配置的状态和任务缓存。"""
