@@ -122,6 +122,7 @@ class PersistentConfigWorker:
     buttons: SchedulerButtonSet = field(default_factory=SchedulerButtonSet)
     status: str = "disconnected"
     last_error: str = ""
+    ws: object = None
 
     def update_from_state(self, state):
         """从 PyWebIO 状态更新按钮和实例状态缓存。"""
@@ -140,6 +141,26 @@ class PersistentConfigWorker:
         if _has_status_evidence(state):
             status_data = extract_status_all(state, [self.config_name])
             self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
+
+    def post_action(self, action):
+        """使用已缓存的调度器按钮回调发送启动或停止动作。"""
+        if action == "start":
+            callback_id = self.buttons.start_callback_id
+            value = self.buttons.start_value
+            next_status = "running"
+        elif action == "stop":
+            callback_id = self.buttons.stop_callback_id
+            value = self.buttons.stop_value
+            next_status = "idle"
+        else:
+            raise WebSocketHijackError("unsupported_action")
+        if not callback_id:
+            raise WebSocketHijackError("worker_not_ready")
+        if self.ws is None:
+            raise WebSocketHijackError("websocket_disconnected")
+        send_callback_event(self.ws, "", callback_id, value)
+        self.status = next_status
+        return {"config": self.config_name, "status": next_status}
 
 
 def parse_pywebio_message(payload):
