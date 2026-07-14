@@ -250,10 +250,27 @@ def extract_instance_names(state):
 def _has_status_evidence(state):
     """判断 PyWebIO 状态中是否包含可用于更新实例状态的证据。"""
     status_icons = ("icon-run", "icon-stop", "icon-idle", "icon-error")
+    header_status_keywords = (
+        "运行中",
+        "空闲",
+        "未连接",
+        "错误",
+        "更新中",
+        "running",
+        "idle",
+        "stopped",
+        "error",
+        "updating",
+        "運行中",
+        "錯誤",
+        "実行中",
+        "エラー",
+    )
     for output in state.outputs:
         text = _searchable_text(output)
+        lower_text = text.lower()
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
-        if "header_status" in scope:
+        if "header_status" in scope and any(keyword in lower_text for keyword in header_status_keywords):
             return True
         if "pywebio-scope-alas-instance-" not in scope:
             continue
