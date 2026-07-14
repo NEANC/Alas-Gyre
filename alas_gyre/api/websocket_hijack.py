@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from dataclasses import field
 import json
 import re
+import threading
 
 import requests
 
@@ -123,6 +124,14 @@ class PersistentConfigWorker:
     status: str = "disconnected"
     last_error: str = ""
     ws: object = None
+    stop_event: object = None
+    reader_thread: object = None
+    local_storage: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        """初始化 stop_event（避免 dataclass field 共享可变默认值）。"""
+        if self.stop_event is None:
+            self.stop_event = threading.Event()
 
     def update_from_state(self, state):
         """从 PyWebIO 状态更新按钮和实例状态缓存。"""
@@ -141,6 +150,52 @@ class PersistentConfigWorker:
         if _has_status_evidence(state):
             status_data = extract_status_all(state, [self.config_name])
             self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
+
+    def read_once(self):
+        """从 WebSocket 接收一条消息，解析并更新状态缓存。"""
+        payload = self.ws.recv()
+        if not payload:
+            return None
+        message = parse_pywebio_message(payload)
+        state = PyWebIOState()
+        state.apply_message(message)
+        handle_pywebio_client_script(self.ws, message, local_storage=self.local_storage)
+        self.update_from_state(state)
+        return message
+
+    def read_loop_step(self):
+        """执行一次读取循环步骤，超时返回 True，异常标记断线并返回 False。"""
+        try:
+            self.read_once()
+            return True
+        except WEBSOCKET_TIMEOUT_ERRORS:
+            return True
+        except Exception as exc:
+            self.status = "disconnected"
+            self.last_error = str(exc)
+            return False
+
+    def start_background_reader(self):
+        """打开 WebSocket 连接并启动后台读取线程。"""
+        self.ws = open_pywebio_websocket(self.config)
+        set_websocket_timeout(self.ws, 2.0)
+        current_config = str(self.config.get("current_config", "") or "")
+        self.local_storage = {"aside": current_config or None}
+        state = collect_initial_state(self.ws, local_storage=self.local_storage)
+        self.update_from_state(state)
+        self.stop_event.clear()
+
+        def _reader_loop():
+            while not self.stop_event.is_set():
+                if not self.read_loop_step():
+                    break
+            try:
+                self.ws.close()
+            except Exception:
+                pass
+
+        self.reader_thread = threading.Thread(target=_reader_loop, daemon=True)
+        self.reader_thread.start()
 
     def post_action(self, action):
         """使用已缓存的调度器按钮回调发送启动或停止动作。"""
@@ -174,16 +229,20 @@ class WebSocketHijackManager:
         self.workers = {}
 
     def ensure_started(self, config):
-        """根据配置检测结果创建或移除 PersistentConfigWorker。"""
+        """根据配置检测结果创建或移除 PersistentConfigWorker 并启动后台 reader。"""
+        self.config = config
         detected = get_configs(config)
         for config_name in detected:
-            self.workers.setdefault(
-                config_name,
-                PersistentConfigWorker(config, config_name),
-            )
+            if config_name not in self.workers:
+                worker = PersistentConfigWorker(config, config_name)
+                self.workers[config_name] = worker
+                worker.start_background_reader()
         stale = [name for name in self.workers if name not in detected]
         for name in stale:
-            self.workers.pop(name)
+            worker = self.workers.pop(name)
+            worker.stop_event.set()
+            if worker.reader_thread is not None:
+                worker.reader_thread.join(timeout=3)
         return self
 
     def get_status_all(self):
@@ -203,7 +262,12 @@ class WebSocketHijackManager:
         return worker.post_action(action)
 
     def stop_all(self):
-        """清空所有 worker。"""
+        """停止所有 worker 的后台读取线程并清空。"""
+        for worker in self.workers.values():
+            worker.stop_event.set()
+        for worker in self.workers.values():
+            if worker.reader_thread is not None:
+                worker.reader_thread.join(timeout=3)
         self.workers.clear()
 
 
