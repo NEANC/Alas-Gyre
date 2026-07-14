@@ -165,6 +165,47 @@ class PersistentConfigWorker:
         }
 
 
+class WebSocketHijackManager:
+    """WebSocket 常驻 worker 管理器。"""
+
+    def __init__(self):
+        """初始化管理器，持有空 worker 字典。"""
+        self.config = {}
+        self.workers = {}
+
+    def ensure_started(self, config):
+        """根据配置检测结果创建或移除 PersistentConfigWorker。"""
+        detected = get_configs(config)
+        for config_name in detected:
+            self.workers.setdefault(
+                config_name,
+                PersistentConfigWorker(config, config_name),
+            )
+        stale = [name for name in self.workers if name not in detected]
+        for name in stale:
+            self.workers.pop(name)
+
+    def get_status_all(self):
+        """遍历 workers 返回所有配置的状态和任务缓存。"""
+        statuses = {}
+        tasks = {}
+        for config_name, worker in self.workers.items():
+            statuses[config_name] = worker.status
+            tasks[config_name] = ""
+        return {"statuses": statuses, "tasks": tasks}
+
+    def post_action(self, config_name, action):
+        """从 workers 取指定配置的 worker 并发送动作。"""
+        worker = self.workers.get(config_name)
+        if worker is None:
+            raise WebSocketHijackError("config_not_found")
+        return worker.post_action(action)
+
+    def stop_all(self):
+        """清空所有 worker。"""
+        self.workers.clear()
+
+
 def parse_pywebio_message(payload):
     """解析 PyWebIO JSON 消息。"""
     data = json.loads(payload)
@@ -633,6 +674,14 @@ def post_update_action(config, action="check"):
             ws.close()
         except Exception:
             pass
+
+
+_PERSISTENT_MANAGER = WebSocketHijackManager()
+
+
+def get_persistent_manager():
+    """获取模块级 WebSocketHijackManager 单例。"""
+    return _PERSISTENT_MANAGER
 
 
 def open_pywebio_websocket(config, timeout=5.0):
