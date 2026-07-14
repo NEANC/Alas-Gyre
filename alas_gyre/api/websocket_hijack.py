@@ -253,7 +253,7 @@ def _has_status_evidence(state):
     for output in state.outputs:
         text = _searchable_text(output)
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
-        if "header_status" in scope or "pywebio-scope-header_status" in text:
+        if "header_status" in scope:
             return True
         if "pywebio-scope-alas-instance-" not in scope:
             continue
