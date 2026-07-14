@@ -186,6 +186,7 @@ class PersistentConfigWorker:
         state = collect_initial_state(self.ws, local_storage=self.local_storage)
         self._accumulated_state = state
         self.update_from_state(self._accumulated_state)
+        self._navigate_to_config_page()
         self.stop_event.clear()
 
         def _reader_loop():
@@ -199,6 +200,26 @@ class PersistentConfigWorker:
 
         self.reader_thread = threading.Thread(target=_reader_loop, daemon=True)
         self.reader_thread.start()
+
+    def _navigate_to_config_page(self):
+        """点击侧边栏目标配置按钮，使页面显示该配置的调度器。"""
+        try:
+            callback_id, value = find_button_callback(
+                self._accumulated_state, self.config_name, scope_keyword="alas-instance-"
+            )
+        except NavigationError:
+            return
+        send_callback_event(self.ws, "", callback_id, value)
+        nav_state = collect_initial_state(self.ws, max_messages=300, local_storage=self.local_storage)
+        self._accumulated_state.outputs.extend(nav_state.outputs)
+        self._accumulated_state.inputs.extend(nav_state.inputs)
+        self._accumulated_state.scripts.extend(nav_state.scripts)
+        self._accumulated_state.task_ids.update(nav_state.task_ids)
+        self._accumulated_state.pin_names.update(nav_state.pin_names)
+        self._accumulated_state.callback_ids.update(nav_state.callback_ids)
+        if nav_state.session_id:
+            self._accumulated_state.session_id = nav_state.session_id
+        self.update_from_state(self._accumulated_state)
 
     def post_action(self, action):
         """使用已缓存的调度器按钮回调发送启动或停止动作。"""
