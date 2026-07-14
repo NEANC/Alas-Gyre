@@ -729,8 +729,12 @@ def post_config_action(config, config_name, action):
         )
         callback_id, value = find_config_action_callback(state, action)
         send_callback_event(ws, "", callback_id, value)
-        status = "running" if action == "start" else "idle"
-        return {"config": config_name, "status": status}
+        return {
+            "config": config_name,
+            "action": action,
+            "status": "submitted",
+            "submitted": True,
+        }
     finally:
         try:
             ws.close()
