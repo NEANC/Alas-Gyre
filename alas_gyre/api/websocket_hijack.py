@@ -147,11 +147,9 @@ class PersistentConfigWorker:
         if action == "start":
             callback_id = self.buttons.start_callback_id
             value = self.buttons.start_value
-            next_status = "running"
         elif action == "stop":
             callback_id = self.buttons.stop_callback_id
             value = self.buttons.stop_value
-            next_status = "idle"
         else:
             raise WebSocketHijackError("unsupported_action")
         if not callback_id:
@@ -159,8 +157,12 @@ class PersistentConfigWorker:
         if self.ws is None:
             raise WebSocketHijackError("websocket_disconnected")
         send_callback_event(self.ws, "", callback_id, value)
-        self.status = next_status
-        return {"config": self.config_name, "status": next_status}
+        return {
+            "config": self.config_name,
+            "action": action,
+            "status": self.status,
+            "submitted": True,
+        }
 
 
 def parse_pywebio_message(payload):
