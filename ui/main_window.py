@@ -237,10 +237,11 @@ class MainConfigRow(QWidget):
                     action,
                 )
                 if result.ok:
-                    status = normalize_status(result.data.get("status", "idle"))
-                    safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: status}, {self.config_name: ""})
-                    if self.main_card.current_config == self.config_name:
-                        safe_emit_signal(self.main_card.status_update_signal, status, "")
+                    if not result.data.get("submitted"):
+                        status = normalize_status(result.data.get("status", "idle"))
+                        safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: status}, {self.config_name: ""})
+                        if self.main_card.current_config == self.config_name:
+                            safe_emit_signal(self.main_card.status_update_signal, status, "")
                     if result.degraded:
                         self.main_card._notify_websocket_degraded_once()
                 else:
@@ -656,7 +657,7 @@ class CardWidget(QFrame):
             else:
                 safe_emit_signal(self.control_error_signal, "configs", tr("control_connect_failed"))
         except Exception:
-            safe_emit_signal(self.status_update_signal, "disconnected", "")
+            safe_emit_signal(self.control_error_signal, "configs", tr("control_connect_failed"))
         finally:
             with self._poll_lock:
                 self._configs_fetching = False

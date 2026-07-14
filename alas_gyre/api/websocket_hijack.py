@@ -186,12 +186,10 @@ class PersistentConfigWorker:
         self.ws = open_pywebio_websocket(self.config)
         try:
             set_websocket_timeout(self.ws, 2.0)
-            current_config = str(self.config.get("current_config", "") or "")
-            self.local_storage = {"aside": current_config or None}
-            state = collect_initial_state(self.ws, local_storage=self.local_storage)
+            self.local_storage = {"aside": self.config_name or None}
+            state = prepare_alas_page(self.ws, self.config_name, self.local_storage)
             self._accumulated_state = state
             self.update_from_state(self._accumulated_state)
-            self._navigate_to_config_page()
             self.stop_event.clear()
 
             def _reader_loop():
@@ -374,11 +372,11 @@ def normalize_alas_status(value):
     text = str(value or "").strip().lower()
     if not text:
         return "error"
-    if text in {"idle", "空闲", "闲置", "未运行", "stopped", "stop"}:
+    if text in {"idle", "空闲", "闲置", "閒置", "inactive", "実行中止", "未运行", "stopped", "stop"}:
         return "idle"
     if text in {"running", "运行中", "run"}:
         return "running"
-    if text in {"error", "出错", "错误"}:
+    if text in {"error", "出错", "错误", "发生错误", "發生錯誤", "エラー発生", "warning"}:
         return "error"
     if text in {"update", "updating", "更新中"}:
         return "update"
@@ -449,17 +447,24 @@ def _has_status_evidence(state):
         "运行中",
         "空闲",
         "闲置",
+        "閒置",
         "未连接",
         "错误",
+        "发生错误",
+        "發生錯誤",
         "更新中",
         "running",
         "idle",
+        "inactive",
         "stopped",
         "error",
+        "warning",
         "updating",
         "運行中",
         "錯誤",
         "実行中",
+        "実行中止",
+        "エラー発生",
         "エラー",
     )
     for output in state.outputs:
@@ -479,13 +484,26 @@ def extract_status_all(state, configs=None):
     for output in state.outputs:
         text = _searchable_text(output)
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
-        if "header_status" in scope:
-            for candidate in ("运行中", "空闲", "闲置", "未连接", "错误", "更新中"):
-                if candidate in text:
-                    status_text = candidate
-                    break
-        if status_text:
-            break
+        if "header_status" not in scope:
+            continue
+        for candidate in (
+            "运行中",
+            "空闲",
+            "闲置",
+            "閒置",
+            "Inactive",
+            "実行中止",
+            "未连接",
+            "发生错误",
+            "發生錯誤",
+            "エラー発生",
+            "Warning",
+            "错误",
+            "更新中",
+        ):
+            if candidate in text:
+                status_text = candidate
+                break
     if status_text:
         status = normalize_alas_status(status_text)
         statuses = {config_name: status for config_name in configs}
