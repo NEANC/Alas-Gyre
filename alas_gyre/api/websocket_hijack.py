@@ -270,7 +270,7 @@ def extract_status_all(state, configs=None):
     for output in state.outputs:
         text = _searchable_text(output)
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
-        if "header_status" in scope or "pywebio-scope-header_status" in text:
+        if "header_status" in scope:
             for candidate in ("运行中", "空闲", "未连接", "错误", "更新中"):
                 if candidate in text:
                     status_text = candidate
