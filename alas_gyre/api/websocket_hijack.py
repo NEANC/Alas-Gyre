@@ -721,24 +721,9 @@ def prepare_alas_page(ws, config_name, local_storage):
 
 
 def post_update_action(config, action="check"):
-    """通过 WebSocket 点击 ALAS 更新器动作。"""
-    if action not in UPDATE_ACTION_KEYWORDS:
-        raise WebSocketHijackError("unsupported_update_action")
-    ws = open_pywebio_websocket(config)
-    try:
-        current_config = str(config.get("current_config", "") or "")
-        local_storage = {"aside": current_config or None}
-        state = prepare_alas_page(ws, current_config, local_storage)
-        _click_button_if_present(ws, state, "更新器")
-        state = collect_initial_state(ws, local_storage=local_storage)
-        callback_id, value = find_update_action_callback(state, action)
-        send_callback_event(ws, "", callback_id, value)
-        return {"action": action, "status": "submitted"}
-    finally:
-        try:
-            ws.close()
-        except Exception:
-            pass
+    """通过 WebSocket 点击 ALAS 更新器动作（本轮不调用）。"""
+    _ = (config, action)
+    raise WebSocketHijackError("update_action_out_of_scope")
 
 
 _PERSISTENT_MANAGER = WebSocketHijackManager()
