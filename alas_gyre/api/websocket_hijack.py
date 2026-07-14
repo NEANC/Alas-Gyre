@@ -374,7 +374,7 @@ def normalize_alas_status(value):
     text = str(value or "").strip().lower()
     if not text:
         return "error"
-    if text in {"idle", "空闲", "未运行", "stopped", "stop"}:
+    if text in {"idle", "空闲", "闲置", "未运行", "stopped", "stop"}:
         return "idle"
     if text in {"running", "运行中", "run"}:
         return "running"
@@ -445,10 +445,10 @@ def extract_instance_names(state):
 
 def _has_status_evidence(state):
     """判断 PyWebIO 状态中是否包含可用于更新实例状态的证据。"""
-    status_icons = ("icon-run", "icon-stop", "icon-idle", "icon-error")
     header_status_keywords = (
         "运行中",
         "空闲",
+        "闲置",
         "未连接",
         "错误",
         "更新中",
@@ -468,10 +468,6 @@ def _has_status_evidence(state):
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
         if "header_status" in scope and any(keyword in lower_text for keyword in header_status_keywords):
             return True
-        if "pywebio-scope-alas-instance-" not in scope:
-            continue
-        if any(status_icon in text for status_icon in status_icons):
-            return True
     return False
 
 
@@ -484,7 +480,7 @@ def extract_status_all(state, configs=None):
         text = _searchable_text(output)
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
         if "header_status" in scope:
-            for candidate in ("运行中", "空闲", "未连接", "错误", "更新中"):
+            for candidate in ("运行中", "空闲", "闲置", "未连接", "错误", "更新中"):
                 if candidate in text:
                     status_text = candidate
                     break
@@ -493,8 +489,6 @@ def extract_status_all(state, configs=None):
     if status_text:
         status = normalize_alas_status(status_text)
         statuses = {config_name: status for config_name in configs}
-    else:
-        statuses.update(_extract_instance_icon_statuses(state))
     return {
         "statuses": statuses,
         "tasks": {config_name: "" for config_name in configs},
