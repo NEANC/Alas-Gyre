@@ -173,7 +173,7 @@ class SingleSessionScheduler:
         self.transport_available = False
         self.last_transport_error = ""
         self.on_status_changed = None
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
         self._control_queue = []
 
     def get_configs_snapshot(self):
