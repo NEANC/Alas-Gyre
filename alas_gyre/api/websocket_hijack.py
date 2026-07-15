@@ -552,7 +552,7 @@ def extract_status_all(state, configs=None):
                 break
     if status_text:
         status = normalize_alas_status(status_text)
-        statuses = {config_name: status for config_name in configs}
+        statuses[configs[0]] = status
     else:
         for output in reversed(state.outputs):
             scope = str(output.get("scope", "") if isinstance(output, dict) else "")
