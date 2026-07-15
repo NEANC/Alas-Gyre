@@ -659,6 +659,8 @@ class CardWidget(QFrame):
 
     def _fetch_configs_task(self):
         try:
+            if normalize_connection_mode(self.config) == CONNECTION_MODE_WEBSOCKET and hasattr(self, "_configs_fetched"):
+                return
             result = gateway_get_configs(self.config)
             if result.ok:
                 configs = result.data.get("configs", ["alas"])
