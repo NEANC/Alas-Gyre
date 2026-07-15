@@ -377,7 +377,41 @@ class SingleSessionScheduler:
 
     def _process_one_control_command(self):
         """处理一个控制命令。"""
-        return False
+        with self._lock:
+            if not self._control_queue:
+                return False
+            command = self._control_queue.pop(0)
+        logger.info("WS control dequeued: config_name=%s action=%s", command.config_name, command.action)
+        try:
+            navigate_to_config(self.ws, self.sidebar_state, command.config_name)
+            state = collect_target_state(
+                self.ws,
+                scope_keywords=("scheduler_btn",),
+                max_messages=300,
+                local_storage=self.local_storage,
+            )
+            callback_id, value = find_config_action_callback(state, command.action)
+            logger.info(
+                "WS control callback found: config_name=%s action=%s callback_id=%s",
+                command.config_name,
+                command.action,
+                callback_id,
+            )
+            send_callback_event(self.ws, "", callback_id, value)
+            self._update_config_from_state(command.config_name, state)
+            logger.info("WS control submitted: config_name=%s action=%s", command.config_name, command.action)
+            return True
+        except Exception as exc:
+            with self._lock:
+                self.scan_errors[command.config_name] = str(exc)
+            logger.warning(
+                "WS control failed: config_name=%s action=%s error_type=%s error=%s",
+                command.config_name,
+                command.action,
+                type(exc).__name__,
+                exc,
+            )
+            return False
 
 
 @dataclass
