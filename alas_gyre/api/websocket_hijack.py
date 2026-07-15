@@ -176,6 +176,7 @@ class SingleSessionScheduler:
         self.on_status_changed = None
         self._lock = threading.Lock()
         self._control_queue = []
+        self.sidebar_state = PyWebIOState()
 
     def get_configs_snapshot(self):
         """返回配置列表缓存。"""
@@ -327,11 +328,52 @@ class SingleSessionScheduler:
 
     def _bootstrap(self):
         """初始化页面并采集配置列表。"""
-        return False
+        self.local_storage = {"aside": str(self.config.get("current_config", "") or "") or None}
+        state = collect_target_state(
+            self.ws,
+            scope_keywords=("alas-instance-",),
+            max_messages=1200,
+            local_storage=self.local_storage,
+        )
+        self._click_bootstrap_button_if_present(state, "简体中文")
+        for label in ("深色", "Dark", "黑暗"):
+            if self._click_bootstrap_button_if_present(state, label):
+                break
+        self.sidebar_state = state
+        return self._update_configs_from_state(state)
+
+    def _click_bootstrap_button_if_present(self, state, label):
+        """点击初始化阶段可选按钮。"""
+        if not self.ws:
+            return False
+        clicked = _click_button_if_present(self.ws, state, label)
+        if clicked:
+            logger.info("WS scheduler bootstrap clicked: label=%s", label)
+        return clicked
 
     def _scan_once(self):
         """执行一轮配置状态扫描。"""
-        return False
+        with self._lock:
+            configs = list(self.configs)
+        if not configs:
+            self._bootstrap()
+            with self._lock:
+                configs = list(self.configs)
+        for config_name in configs:
+            if self.stop_event.is_set():
+                return False
+            self._process_one_control_command()
+            logger.debug("WS scheduler scan config start: config_name=%s", config_name)
+            navigate_to_config(self.ws, self.sidebar_state, config_name)
+            state = collect_target_state(
+                self.ws,
+                scope_keywords=("header_status", "scheduler_btn"),
+                max_messages=300,
+                local_storage=self.local_storage,
+            )
+            self._update_config_from_state(config_name, state)
+            logger.debug("WS scheduler scan config end: config_name=%s", config_name)
+        return True
 
     def _process_one_control_command(self):
         """处理一个控制命令。"""
@@ -1107,6 +1149,13 @@ def _click_button_if_present(ws, state, label, scope_keyword=""):
         callback_id, value = find_button_callback(state, label, scope_keyword=scope_keyword)
     except NavigationError:
         return False
+    send_callback_event(ws, "", callback_id, value)
+    return True
+
+
+def navigate_to_config(ws, state, config_name):
+    """在当前 PyWebIO session 中点击侧边栏配置。"""
+    callback_id, value = find_button_callback(state, config_name, scope_keyword="alas-instance-")
     send_callback_event(ws, "", callback_id, value)
     return True
 
