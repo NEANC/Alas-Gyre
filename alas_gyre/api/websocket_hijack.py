@@ -207,6 +207,7 @@ class SingleSessionScheduler:
             raise WebSocketHijackError("unsupported_action")
         command = ControlCommand(str(config_name), str(action))
         with self._lock:
+            self.control_errors.pop(str(config_name), None)
             self._control_queue = [
                 item for item in self._control_queue
                 if item.config_name != command.config_name
@@ -385,7 +386,7 @@ class SingleSessionScheduler:
                 local_storage=self.local_storage,
                 stop_on_first_match=False,
                 stop_when_all_keywords_matched=True,
-                post_match_drain_messages=5,
+                post_match_drain_target_outputs=5,
             )
             self._update_config_from_state(config_name, state)
             logger.debug("WS scheduler scan config end: config_name=%s", config_name)
@@ -415,6 +416,8 @@ class SingleSessionScheduler:
             )
             send_callback_event(self.ws, "", callback_id, value)
             self._update_config_from_state(command.config_name, state)
+            with self._lock:
+                self.control_errors.pop(command.config_name, None)
             logger.info("WS control submitted: config_name=%s action=%s", command.config_name, command.action)
             return True
         except Exception as exc:
@@ -1102,13 +1105,17 @@ def set_websocket_timeout(ws, timeout):
 def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=None,
                         stop_on_first_match=True,
                         stop_when_all_keywords_matched=False,
-                        post_match_drain_messages=0):
-    """收集 PyWebIO 消息，直到出现目标 scope。
+                        post_match_drain_target_outputs=0):
+    """按目标 scope 关键词收集 PyWebIO 消息，支持三种停止策略。
 
-    stop_on_first_match=True 时：首次匹配目标 scope 立即返回该 state。
-    stop_when_all_keywords_matched=True 时：所有关键词各命中一次后，继续
-        drain post_match_drain_messages 条消息（再收一次 scope 输出），然后返回。
-    两者都为 False 时：在 max_messages 范围内持续收集所有匹配 scope。
+    stop_on_first_match=True（默认）：
+        首次匹配任一目标 scope 立即返回。
+    stop_when_all_keywords_matched=True：
+        所有关键词各命中一次后，继续 drain post_match_drain_target_outputs 条
+        目标 scope 输出，然后返回。drain 阶段使用 0.2s 短 timeout 避免阻塞。
+    两者都为 False：
+        在 max_messages 范围内持续收集所有匹配 scope，直到 timeout 或上限。
+    优先级：stop_on_first_match > stop_when_all_keywords_matched > 无提前停止。
     """
     state = PyWebIOState()
     expected = tuple(str(item or "") for item in scope_keywords)
@@ -1149,10 +1156,11 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
                     "WS target scope all matched: messages=%s keywords=%s drain=%s",
                     messages,
                     expected,
-                    post_match_drain_messages,
+                    post_match_drain_target_outputs,
                 )
                 all_keywords_matched = True
-                drain_remaining = post_match_drain_messages + 1  # drain one more scope output
+                drain_remaining = post_match_drain_target_outputs + 1
+                set_websocket_timeout(ws, 0.2)
         if all_keywords_matched:
             drain_remaining -= 1
             if drain_remaining <= 0:

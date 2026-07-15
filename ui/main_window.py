@@ -767,15 +767,17 @@ class CardWidget(QFrame):
                 current_task = tasks.get(self.current_config, "")
                 safe_emit_signal(self.status_update_signal, current_status, current_task)
                 control_errors = data.get("control_errors", {})
-                if control_errors:
-                    current_control_error = control_errors.get(self.current_config)
-                    if current_control_error:
-                        last = getattr(self, "_last_control_errors", {})
-                        last_msg = str(current_control_error)
-                        if last.get(self.current_config) != last_msg:
-                            last[self.current_config] = last_msg
-                            self._last_control_errors = last
-                            safe_emit_signal(self.control_error_signal, "control", last_msg)
+                last = getattr(self, "_last_control_errors", {})
+                current_control_error = control_errors.get(self.current_config)
+                if current_control_error:
+                    last_msg = str(current_control_error)
+                    if last.get(self.current_config) != last_msg:
+                        last[self.current_config] = last_msg
+                        self._last_control_errors = last
+                        safe_emit_signal(self.control_error_signal, "control", last_msg)
+                else:
+                    last.pop(self.current_config, None)
+                    self._last_control_errors = last
                 if result.degraded:
                     self._notify_websocket_degraded_once()
             else:
