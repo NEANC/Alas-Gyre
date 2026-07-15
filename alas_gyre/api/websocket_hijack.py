@@ -1131,59 +1131,62 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
     all_keywords_matched = False
     drain_remaining = 0
     saved_timeout = _get_websocket_timeout(ws, fallback=2.0)
+    timeout_changed = False
     messages = 0
-    for _ in range(max_messages):
-        try:
-            payload = ws.recv()
-        except WEBSOCKET_TIMEOUT_ERRORS:
-            break
-        if not payload:
-            continue
-        messages += 1
-        message = parse_pywebio_message(payload)
-        handle_pywebio_client_script(ws, message, local_storage=local_storage)
-        if message.command not in {"output", "output_ctl"}:
-            continue
-        scope = str(message.spec.get("scope", "") if isinstance(message.spec, dict) else "")
-        matched_scope = next((kw for kw in expected if kw in scope), None)
-        if matched_scope is None:
-            continue
-        state.apply_message(message)
-        matched_keywords.add(matched_scope)
-        logger.info(
-            "WS target scope matched: messages=%s scope=%s keywords=%s outputs=%s",
-            messages,
-            scope,
-            expected,
-            len(state.outputs),
-        )
-        if stop_on_first_match:
-            set_websocket_timeout(ws, saved_timeout)
-            return state
-        if stop_when_all_keywords_matched and not all_keywords_matched:
-            if matched_keywords >= set(expected):
-                logger.info(
-                    "WS target scope all matched: messages=%s keywords=%s drain=%s",
-                    messages,
-                    expected,
-                    post_match_drain_target_outputs,
-                )
-                all_keywords_matched = True
-                drain_remaining = post_match_drain_target_outputs + 1
-                set_websocket_timeout(ws, 0.2)
-        if all_keywords_matched:
-            drain_remaining -= 1
-            if drain_remaining <= 0:
-                logger.info(
-                    "WS target scope drain done: messages=%s keywords=%s",
-                    messages,
-                    expected,
-                )
-                set_websocket_timeout(ws, saved_timeout)
+    try:
+        for _ in range(max_messages):
+            try:
+                payload = ws.recv()
+            except WEBSOCKET_TIMEOUT_ERRORS:
+                break
+            if not payload:
+                continue
+            messages += 1
+            message = parse_pywebio_message(payload)
+            handle_pywebio_client_script(ws, message, local_storage=local_storage)
+            if message.command not in {"output", "output_ctl"}:
+                continue
+            scope = str(message.spec.get("scope", "") if isinstance(message.spec, dict) else "")
+            matched_scope = next((kw for kw in expected if kw in scope), None)
+            if matched_scope is None:
+                continue
+            state.apply_message(message)
+            matched_keywords.add(matched_scope)
+            logger.info(
+                "WS target scope matched: messages=%s scope=%s keywords=%s outputs=%s",
+                messages,
+                scope,
+                expected,
+                len(state.outputs),
+            )
+            if stop_on_first_match:
                 return state
-    set_websocket_timeout(ws, saved_timeout)
-    logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
-    return state
+            if stop_when_all_keywords_matched and not all_keywords_matched:
+                if matched_keywords >= set(expected):
+                    logger.info(
+                        "WS target scope all matched: messages=%s keywords=%s drain=%s",
+                        messages,
+                        expected,
+                        post_match_drain_target_outputs,
+                    )
+                    all_keywords_matched = True
+                    drain_remaining = post_match_drain_target_outputs + 1
+                    set_websocket_timeout(ws, 0.2)
+                    timeout_changed = True
+            if all_keywords_matched:
+                drain_remaining -= 1
+                if drain_remaining <= 0:
+                    logger.info(
+                        "WS target scope drain done: messages=%s keywords=%s",
+                        messages,
+                        expected,
+                    )
+                    return state
+        logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
+        return state
+    finally:
+        if timeout_changed:
+            set_websocket_timeout(ws, saved_timeout)
 
 
 def collect_state_until_buttons(ws, labels, max_messages=300, local_storage=None):
