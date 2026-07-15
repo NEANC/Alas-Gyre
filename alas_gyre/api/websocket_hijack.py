@@ -892,6 +892,39 @@ def set_websocket_timeout(ws, timeout):
         pass
 
 
+def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=None):
+    """收集 PyWebIO 消息，直到出现目标 scope。"""
+    state = PyWebIOState()
+    expected = tuple(str(item or "") for item in scope_keywords)
+    messages = 0
+    for _ in range(max_messages):
+        try:
+            payload = ws.recv()
+        except WEBSOCKET_TIMEOUT_ERRORS:
+            break
+        if not payload:
+            continue
+        messages += 1
+        message = parse_pywebio_message(payload)
+        handle_pywebio_client_script(ws, message, local_storage=local_storage)
+        if message.command not in {"output", "output_ctl"}:
+            continue
+        scope = str(message.spec.get("scope", "") if isinstance(message.spec, dict) else "")
+        if not any(keyword in scope for keyword in expected):
+            continue
+        state.apply_message(message)
+        logger.info(
+            "WS target scope matched: messages=%s scope=%s keywords=%s outputs=%s",
+            messages,
+            scope,
+            expected,
+            len(state.outputs),
+        )
+        return state
+    logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
+    return state
+
+
 def collect_state_until_buttons(ws, labels, max_messages=300, local_storage=None):
     """收集 PyWebIO 状态直到出现任一目标按钮。"""
     state = PyWebIOState()
