@@ -436,8 +436,6 @@ def extract_instance_names(state):
         for label in _extract_labels(output):
             if label and label not in names:
                 names.append(label)
-    if not names:
-        return extract_config_names(state)
     return names
 
 
