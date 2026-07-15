@@ -30,6 +30,15 @@ CONFIG_ACTION_KEYWORDS = {
     "start": ("启动", "啟動", "実行", "start"),
     "stop": ("停止", "中止", "stop"),
 }
+_SCHEDULER_BTN_STATUS_LABELS = (
+    "停止",
+    "中止",
+    "stop",
+    "启动",
+    "啟動",
+    "実行",
+    "start",
+)
 try:
     import websocket
 
@@ -471,6 +480,8 @@ def _has_status_evidence(state):
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
         if "header_status" in scope and any(keyword in lower_text for keyword in header_status_keywords):
             return True
+        if "scheduler_btn" in scope and any(label in lower_text for label in _SCHEDULER_BTN_STATUS_LABELS):
+            return True
     return False
 
 
@@ -505,6 +516,19 @@ def extract_status_all(state, configs=None):
     if status_text:
         status = normalize_alas_status(status_text)
         statuses = {config_name: status for config_name in configs}
+    else:
+        for output in reversed(state.outputs):
+            scope = str(output.get("scope", "") if isinstance(output, dict) else "")
+            if "scheduler_btn" not in scope:
+                continue
+            text = _searchable_text(output)
+            lower_text = text.lower()
+            if any(label in lower_text for label in ("停止", "中止", "stop")):
+                statuses[configs[0]] = "running"
+                break
+            if any(label in lower_text for label in ("启动", "啟動", "実行", "start")):
+                statuses[configs[0]] = "idle"
+                break
     return {
         "statuses": statuses,
         "tasks": {config_name: "" for config_name in configs},
