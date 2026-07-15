@@ -442,9 +442,16 @@ class InitSetupWindow(QDialog):
         self._force_layout()
 
     def _go_back(self):
+        if self.current_step == 2 and self._is_websocket_mode_selected():
+            self._set_step(0)
+            return
         self._set_step(self.current_step - 1)
 
     def _go_next(self):
+        if self.current_step == 0 and self._is_websocket_mode_selected():
+            self._sync_config_from_ui()
+            self._set_step(2)
+            return
         self._set_step(self.current_step + 1)
 
     def _refresh_runtime_buttons(self):
