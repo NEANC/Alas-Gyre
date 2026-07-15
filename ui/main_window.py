@@ -325,7 +325,7 @@ class CardWidget(QFrame):
         self._configs[0] = self.current_config
         self._configs_fetching = False
         self._configs_last_fetch_at = 0.0
-        self._configs_fetch_interval = 15.0
+        self._configs_fetch_interval = 3.0
         self._polling_status = False
         self._poll_lock = threading.Lock()
         self._statuses = {}
