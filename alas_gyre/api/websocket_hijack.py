@@ -160,6 +160,7 @@ class PersistentConfigWorker:
     stop_event: object = None
     reader_thread: object = None
     local_storage: dict = field(default_factory=dict)
+    on_status_changed: object = None
 
     def __post_init__(self):
         """初始化 stop_event 和累积状态（避免 dataclass field 共享可变默认值）。"""
@@ -183,7 +184,11 @@ class PersistentConfigWorker:
             pass
         if _has_status_evidence(state):
             status_data = extract_status_all(state, [self.config_name])
-            self.status = status_data.get("statuses", {}).get(self.config_name, self.status)
+            new_status = status_data.get("statuses", {}).get(self.config_name, self.status)
+            if new_status != self.status:
+                self.status = new_status
+                if callable(self.on_status_changed):
+                    self.on_status_changed(self.config_name, self.status)
 
     def read_once(self):
         """从 WebSocket 接收一条消息，解析并累积更新状态缓存。"""
@@ -206,7 +211,10 @@ class PersistentConfigWorker:
         except WEBSOCKET_TIMEOUT_ERRORS:
             return True
         except Exception:
-            self.status = "disconnected"
+            if self.status != "disconnected":
+                self.status = "disconnected"
+                if callable(self.on_status_changed):
+                    self.on_status_changed(self.config_name, "disconnected")
             self.last_error = traceback.format_exc()
             return False
 
@@ -294,6 +302,14 @@ class WebSocketHijackManager:
         self.workers = {}
         self._lock = threading.Lock()
         self._config_fingerprint = None
+        self._status_callback = None
+
+    def set_status_callback(self, callback):
+        """注册状态变更回调，新 worker 会在状态变化时调用 callback(config_name, status)。"""
+        self._status_callback = callback
+        with self._lock:
+            for worker in self.workers.values():
+                worker.on_status_changed = callback
 
     @staticmethod
     def _make_config_fingerprint(config):
@@ -321,6 +337,7 @@ class WebSocketHijackManager:
             for config_name in detected:
                 if config_name not in self.workers:
                     worker = PersistentConfigWorker(config, config_name)
+                    worker.on_status_changed = self._status_callback
                     self.workers[config_name] = worker
                     new_workers[config_name] = worker
             stale = [name for name in list(self.workers.keys()) if name not in detected]
