@@ -9,6 +9,7 @@ import html
 import hashlib
 
 from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_mode import CONNECTION_MODE_WEBSOCKET, normalize_connection_mode
 from .error_screenshot_window import ErrorScreenshotPanel
 from .widgets import WindowButton
 from .i18n import tr
@@ -178,6 +179,10 @@ class LogWindow(QDialog):
         super().mouseMoveEvent(event)
 
     def _fetch_log(self):
+        if normalize_connection_mode(self.config) == CONNECTION_MODE_WEBSOCKET:
+            if hasattr(self, "poll_timer"):
+                self.poll_timer.stop()
+            return
         if self._fetching_log:
             return
         self._fetching_log = True
