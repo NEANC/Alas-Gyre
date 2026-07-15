@@ -529,7 +529,7 @@ def extract_status_all(state, configs=None):
         return {"statuses": {}, "tasks": {}}
     statuses = {config_name: "error" for config_name in configs}
     status_text = ""
-    for output in state.outputs:
+    for output in reversed(state.outputs):
         text = _searchable_text(output)
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
         if "header_status" not in scope:
@@ -552,6 +552,8 @@ def extract_status_all(state, configs=None):
             if candidate in text:
                 status_text = candidate
                 break
+        if status_text:
+            break
     if status_text:
         status = normalize_alas_status(status_text)
         statuses[configs[0]] = status
