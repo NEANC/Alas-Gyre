@@ -80,6 +80,13 @@ def control_connect_failed_message(config):
     return tr("control_connect_failed")
 
 
+def overlay_only_unavailable_message(config):
+    """WebSocket 模式下返回 Overlay-only 功能不可用提示。"""
+    if normalize_connection_mode(config) == CONNECTION_MODE_WEBSOCKET:
+        return tr("overlay_only_unavailable")
+    return ""
+
+
 MAIN_CARD_WIDTH = 294
 MAIN_TITLE_HEIGHT = 30
 MAIN_BOTTOM_HEIGHT = 40
@@ -512,6 +519,10 @@ class CardWidget(QFrame):
             self.log_dialog.set_config(self.current_config)
 
     def delete_config(self, config_name):
+        message = overlay_only_unavailable_message(self.config)
+        if message:
+            show_warning(self, tr("control_failed_title"), message)
+            return
         threading.Thread(target=self._delete_config_task, args=(config_name,), daemon=True).start()
 
     def _delete_config_task(self, config_name):
@@ -837,6 +848,10 @@ class CardWidget(QFrame):
             print(f"[Log] Opening home page -> {url}")
             webbrowser.open(url)
         elif name == "log":
+            message = overlay_only_unavailable_message(self.config)
+            if message:
+                show_warning(self, tr("control_failed_title"), message)
+                return
             from .log_window import LogWindow
             dialog = getattr(self, "log_dialog", None)
             if dialog is not None:

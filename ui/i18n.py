@@ -114,6 +114,7 @@ TRANSLATIONS = {
         "control_failed_title": "操作失败",
         "control_connect_failed": "未连接到 ALAS Overlay API。\n请使用 start_gyre_alas.bat / start_gyre_alas.sh 启动 ALAS 后重试。",
         "control_websocket_failed": "WebSocket 劫持控制失败。\n请检查 ALAS WebUI 地址、连接模式和目标配置状态后重试。",
+        "overlay_only_unavailable": "当前为 WebSocket 模式，此功能仅支持 Overlay API。\n如需使用该功能，请切换到 Overlay 模式并通过 gyre_runtime 启动 ALAS。",
         "control_http_failed": "ALAS Overlay API 返回 HTTP {status}。",
         "control_http_failed_with_detail": "ALAS Overlay API 返回 HTTP {status}：\n{error}",
         
@@ -301,6 +302,7 @@ TRANSLATIONS = {
         "control_failed_title": "Action Failed",
         "control_connect_failed": "Cannot connect to ALAS Overlay API.\nStart ALAS with start_gyre_alas.bat / start_gyre_alas.sh and try again.",
         "control_websocket_failed": "WebSocket hijack control failed.\nCheck the ALAS WebUI address, connection mode, and target config status, then try again.",
+        "overlay_only_unavailable": "The current connection mode is WebSocket. This feature requires Overlay API.\nSwitch to Overlay mode and start ALAS through gyre_runtime to use it.",
         "control_http_failed": "ALAS Overlay API returned HTTP {status}.",
         "control_http_failed_with_detail": "ALAS Overlay API returned HTTP {status}:\n{error}",
         
