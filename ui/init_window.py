@@ -267,10 +267,12 @@ class InitSetupWindow(QDialog):
         mode_layout.addWidget(self.connectionModeCombo, stretch=1)
         panel_layout.addLayout(mode_layout)
 
-        mode_hint = QLabel(tr("init_connection_mode_desc"))
-        mode_hint.setObjectName("initSubtle")
-        mode_hint.setWordWrap(True)
-        panel_layout.addWidget(mode_hint)
+        self.connectionModeCombo.currentIndexChanged.connect(self._refresh_connection_mode_ui)
+
+        self.modeHint = QLabel(tr("init_connection_mode_desc"))
+        self.modeHint.setObjectName("initSubtle")
+        self.modeHint.setWordWrap(True)
+        panel_layout.addWidget(self.modeHint)
 
         token_hint = QLabel(tr("token_auto_hint"))
         token_hint.setObjectName("initSubtle")
@@ -296,6 +298,7 @@ class InitSetupWindow(QDialog):
         self.runtimeBtn.clicked.connect(self._generate_overlay_launcher)
         runtime_btn_layout.addWidget(self.runtimeBtn)
         panel_layout.addLayout(runtime_btn_layout)
+        self._refresh_connection_mode_ui()
         layout.addWidget(panel)
 
         hint = QLabel(tr("runtime_next_hint"), page)
@@ -450,6 +453,18 @@ class InitSetupWindow(QDialog):
             self.openRuntimeDirBtn.setEnabled(enabled)
         if hasattr(self, "openRuntimeDirBtn2"):
             self.openRuntimeDirBtn2.setEnabled(enabled)
+
+    def _is_websocket_mode_selected(self):
+        return self.connectionModeCombo.currentData() == "websocket"
+
+    def _refresh_connection_mode_ui(self):
+        is_websocket = self._is_websocket_mode_selected()
+        if hasattr(self, "modeHint"):
+            self.modeHint.setText(tr("init_websocket_mode_desc") if is_websocket else tr("init_connection_mode_desc"))
+        if hasattr(self, "runtimeBtn"):
+            self.runtimeBtn.setVisible(not is_websocket)
+        if hasattr(self, "openRuntimeDirBtn"):
+            self.openRuntimeDirBtn.setVisible(not is_websocket)
 
     def _center_on_parent(self):
         if self.parent():
