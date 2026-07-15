@@ -204,21 +204,19 @@ class PersistentConfigWorker:
         return message
 
     def read_loop_step(self):
-        """执行一次读取循环步骤，超时返回 True，异常标记断线并返回 False。"""
+        """执行一次读取循环步骤，超时返回 True，异常标记传输断线并返回 False。"""
         try:
             self.read_once()
             return True
         except WEBSOCKET_TIMEOUT_ERRORS:
             return True
         except Exception as exc:
-            if self.status != "disconnected":
-                self.status = "disconnected"
-                if callable(self.on_status_changed):
-                    self.on_status_changed(self.config_name, "disconnected")
             self.last_error = traceback.format_exc()
+            self.ws = None
             logger.warning(
-                "WS reader disconnected: config_name=%s error_type=%s error=%s",
+                "WS reader disconnected: config_name=%s status=%s error_type=%s error=%s",
                 self.config_name,
+                self.status,
                 type(exc).__name__,
                 exc,
             )
@@ -336,27 +334,36 @@ class WebSocketHijackManager:
 
         with self._lock:
             if fingerprint == self._config_fingerprint and self.workers:
-                logger.debug("WS manager reuse workers: count=%s", len(self.workers))
-                return self
-            detected = get_configs(config)
-            logger.info("WS manager detected configs: count=%s configs=%s", len(detected), detected)
-            self._config_fingerprint = fingerprint
-            new_workers = {}
-            for config_name in detected:
-                if config_name not in self.workers:
-                    worker = PersistentConfigWorker(config, config_name)
-                    worker.on_status_changed = self._status_callback
-                    self.workers[config_name] = worker
-                    new_workers[config_name] = worker
-            stale = [name for name in list(self.workers.keys()) if name not in detected]
-            for name in stale:
-                worker = self.workers.pop(name)
-                logger.info("WS worker stop stale: config_name=%s", name)
-                worker.stop_event.set()
-                if worker.reader_thread is not None:
-                    worker.reader_thread.join(timeout=3)
+                start_workers = [
+                    worker for worker in self.workers.values()
+                    if worker.ws is None and not worker.stop_event.is_set()
+                ]
+                logger.debug(
+                    "WS manager reuse workers: count=%s restart=%s",
+                    len(self.workers),
+                    [worker.config_name for worker in start_workers],
+                )
+            else:
+                detected = get_configs(config)
+                logger.info("WS manager detected configs: count=%s configs=%s", len(detected), detected)
+                self._config_fingerprint = fingerprint
+                new_workers = {}
+                for config_name in detected:
+                    if config_name not in self.workers:
+                        worker = PersistentConfigWorker(config, config_name)
+                        worker.on_status_changed = self._status_callback
+                        self.workers[config_name] = worker
+                        new_workers[config_name] = worker
+                stale = [name for name in list(self.workers.keys()) if name not in detected]
+                for name in stale:
+                    worker = self.workers.pop(name)
+                    logger.info("WS worker stop stale: config_name=%s", name)
+                    worker.stop_event.set()
+                    if worker.reader_thread is not None:
+                        worker.reader_thread.join(timeout=3)
+                start_workers = list(new_workers.values())
 
-        for worker in new_workers.values():
+        for worker in start_workers:
             logger.info("WS worker start: config_name=%s", worker.config_name)
             worker.start_background_reader()
         return self
