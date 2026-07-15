@@ -768,6 +768,7 @@ class CardWidget(QFrame):
                 safe_emit_signal(self.status_update_signal, current_status, current_task)
                 control_errors = data.get("control_errors", {})
                 last = getattr(self, "_last_control_errors", {})
+                last = {c: msg for c, msg in last.items() if c in control_errors}
                 current_control_error = control_errors.get(self.current_config)
                 if current_control_error:
                     last_msg = str(current_control_error)

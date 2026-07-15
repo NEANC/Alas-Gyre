@@ -1102,6 +1102,14 @@ def set_websocket_timeout(ws, timeout):
         pass
 
 
+def _get_websocket_timeout(ws, fallback=2.0):
+    """读取当前 WebSocket 超时值，取不到时返回 fallback。"""
+    try:
+        return ws.gettimeout()
+    except AttributeError:
+        return fallback
+
+
 def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=None,
                         stop_on_first_match=True,
                         stop_when_all_keywords_matched=False,
@@ -1122,6 +1130,7 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
     matched_keywords = set()
     all_keywords_matched = False
     drain_remaining = 0
+    saved_timeout = _get_websocket_timeout(ws, fallback=2.0)
     messages = 0
     for _ in range(max_messages):
         try:
@@ -1149,6 +1158,7 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
             len(state.outputs),
         )
         if stop_on_first_match:
+            set_websocket_timeout(ws, saved_timeout)
             return state
         if stop_when_all_keywords_matched and not all_keywords_matched:
             if matched_keywords >= set(expected):
@@ -1169,7 +1179,9 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
                     messages,
                     expected,
                 )
+                set_websocket_timeout(ws, saved_timeout)
                 return state
+    set_websocket_timeout(ws, saved_timeout)
     logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
     return state
 
