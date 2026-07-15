@@ -766,7 +766,9 @@ class CardWidget(QFrame):
                 current_status = statuses.get(self.current_config, "idle")
                 current_task = tasks.get(self.current_config, "")
                 safe_emit_signal(self.status_update_signal, current_status, current_task)
-                control_errors = data.get("control_errors", {})
+                control_errors = data.get("control_errors", {}) if isinstance(data, dict) else {}
+                if not isinstance(control_errors, dict):
+                    control_errors = {}
                 last = getattr(self, "_last_control_errors", {})
                 last = {c: msg for c, msg in last.items() if c in control_errors}
                 current_control_error = control_errors.get(self.current_config)

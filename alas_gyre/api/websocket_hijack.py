@@ -1106,7 +1106,7 @@ def _get_websocket_timeout(ws, fallback=2.0):
     """读取当前 WebSocket 超时值，取不到时返回 fallback。"""
     try:
         return ws.gettimeout()
-    except AttributeError:
+    except Exception:
         return fallback
 
 
