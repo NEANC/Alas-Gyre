@@ -171,6 +171,7 @@ class SingleSessionScheduler:
         self.buttons = {}
         self.last_seen_at = {}
         self.scan_errors = {}
+        self.control_errors = {}
         self.transport_available = False
         self.last_transport_error = ""
         self.on_status_changed = None
@@ -189,7 +190,15 @@ class SingleSessionScheduler:
             return {
                 "statuses": dict(self.statuses),
                 "tasks": dict(self.tasks),
-                "control_errors": dict(self.scan_errors),
+                "scan_errors": dict(self.scan_errors),
+                "control_errors": dict(self.control_errors),
+                "debug_buttons": {
+                    config_name: {
+                        "start_callback_id": btn.start_callback_id,
+                        "stop_callback_id": btn.stop_callback_id,
+                    }
+                    for config_name, btn in self.buttons.items()
+                },
             }
 
     def post_action(self, config_name, action):
@@ -249,6 +258,7 @@ class SingleSessionScheduler:
             self.tasks[str(config_name)] = ""
             self.last_seen_at[str(config_name)] = time.monotonic()
             self.scan_errors.pop(str(config_name), None)
+            self.control_errors.pop(str(config_name), None)
             # 按钮缓存仅用于诊断/监控批量状态；控制执行在同一个 session 内
             # 重新收集 scheduler_btn scope 以确保 callback 有效性。
             buttons = self.buttons.setdefault(str(config_name), SchedulerButtonSet())
@@ -372,7 +382,7 @@ class SingleSessionScheduler:
             state = collect_target_state(
                 self.ws,
                 scope_keywords=("header_status", "scheduler_btn"),
-                max_messages=100,
+                max_messages=300,
                 local_storage=self.local_storage,
                 stop_on_first_match=False,
             )
@@ -408,7 +418,7 @@ class SingleSessionScheduler:
             return True
         except Exception as exc:
             with self._lock:
-                self.scan_errors[command.config_name] = str(exc)
+                self.control_errors[command.config_name] = str(exc)
             logger.warning(
                 "WS control failed: config_name=%s action=%s error_type=%s error=%s",
                 command.config_name,
@@ -1093,10 +1103,12 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
     """收集 PyWebIO 消息，直到出现目标 scope。
 
     stop_on_first_match=True 时：首次匹配目标 scope 立即返回该 state。
-    stop_on_first_match=False 时：在 max_messages 范围内持续收集所有匹配 scope。
+    stop_on_first_match=False 时：在 max_messages 范围内持续收集所有匹配 scope，
+    并在所有关键词均命中至少一次后提前退出。
     """
     state = PyWebIOState()
     expected = tuple(str(item or "") for item in scope_keywords)
+    matched_keywords = set()
     messages = 0
     for _ in range(max_messages):
         try:
@@ -1111,9 +1123,11 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
         if message.command not in {"output", "output_ctl"}:
             continue
         scope = str(message.spec.get("scope", "") if isinstance(message.spec, dict) else "")
-        if not any(keyword in scope for keyword in expected):
+        matched_scope = next((kw for kw in expected if kw in scope), None)
+        if matched_scope is None:
             continue
         state.apply_message(message)
+        matched_keywords.add(matched_scope)
         logger.info(
             "WS target scope matched: messages=%s scope=%s keywords=%s outputs=%s",
             messages,
@@ -1122,6 +1136,13 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
             len(state.outputs),
         )
         if stop_on_first_match:
+            return state
+        if matched_keywords >= set(expected):
+            logger.info(
+                "WS target scope all matched: messages=%s keywords=%s",
+                messages,
+                expected,
+            )
             return state
     logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
     return state
