@@ -646,21 +646,21 @@ def _iter_button_groups(value):
 
 
 def find_button_callback(state, label, scope_keyword=""):
-    """按精确按钮标签查找回调 ID 与按钮值。"""
+    """按精确按钮标签查找回调 ID 与按钮索引。"""
     expected = str(label or "")
     for output in state.outputs:
         scope = str(output.get("scope", "") if isinstance(output, dict) else "")
         if scope_keyword and scope_keyword not in scope:
             continue
         for group_callback_id, buttons in _iter_button_groups(output):
-            for button in buttons:
+            for index, button in enumerate(buttons):
                 if not isinstance(button, dict):
                     continue
                 if str(button.get("label", "") or "") != expected:
                     continue
                 callback_id = str(button.get("callback_id", "") or button.get("callback", "") or group_callback_id)
                 if callback_id:
-                    return callback_id, button.get("value")
+                    return callback_id, index
     raise NavigationError(f"button_callback_not_found:{expected}")
 
 
