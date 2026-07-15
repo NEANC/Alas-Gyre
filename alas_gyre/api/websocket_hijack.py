@@ -563,24 +563,25 @@ class PersistentConfigWorker:
 
 
 class WebSocketHijackManager:
-    """WebSocket 常驻 worker 管理器。"""
+    """WS 劫持连接生命周期管理器（单会话调度器）。"""
 
     _FINGERPRINT_KEY_FIELDS = ("ip", "port", "current_config")
 
     def __init__(self):
-        """初始化管理器，持有空 worker 字典、线程锁和配置指纹。"""
+        """初始化单会话 WS manager。"""
         self.config = {}
-        self.workers = {}
+        self.scheduler = None
         self._lock = threading.Lock()
         self._config_fingerprint = None
         self._status_callback = None
+        self.workers = {}
 
     def set_status_callback(self, callback):
-        """注册状态变更回调，新 worker 会在状态变化时调用 callback(config_name, status)。"""
+        """注册状态变更回调。"""
         self._status_callback = callback
         with self._lock:
-            for worker in self.workers.values():
-                worker.on_status_changed = callback
+            if self.scheduler is not None:
+                self.scheduler.on_status_changed = callback
 
     @staticmethod
     def _make_config_fingerprint(config):
@@ -592,78 +593,55 @@ class WebSocketHijackManager:
         return hash(items)
 
     def ensure_started(self, config):
-        """根据配置检测结果创建或移除 PersistentConfigWorker 并启动后台 reader。
-
-        若配置指纹未变化且已有 worker，则跳过 HTTP+WS 探测直接返回。
-        """
+        """确保单会话调度器已启动。"""
         self.config = config
         fingerprint = self._make_config_fingerprint(config)
-
+        old_scheduler = None
         with self._lock:
-            if fingerprint == self._config_fingerprint and self.workers:
-                start_workers = [
-                    worker for worker in self.workers.values()
-                    if worker.ws is None and not worker.stop_event.is_set()
-                ]
-                logger.debug(
-                    "WS manager reuse workers: count=%s restart=%s",
-                    len(self.workers),
-                    [worker.config_name for worker in start_workers],
-                )
-            else:
-                detected = get_configs(config)
-                logger.info("WS manager detected configs: count=%s configs=%s", len(detected), detected)
-                self._config_fingerprint = fingerprint
-                new_workers = {}
-                for config_name in detected:
-                    if config_name not in self.workers:
-                        worker = PersistentConfigWorker(config, config_name)
-                        worker.on_status_changed = self._status_callback
-                        self.workers[config_name] = worker
-                        new_workers[config_name] = worker
-                stale = [name for name in list(self.workers.keys()) if name not in detected]
-                for name in stale:
-                    worker = self.workers.pop(name)
-                    logger.info("WS worker stop stale: config_name=%s", name)
-                    worker.stop_event.set()
-                    if worker.reader_thread is not None:
-                        worker.reader_thread.join(timeout=3)
-                start_workers = list(new_workers.values())
-
-        for worker in start_workers:
-            logger.info("WS worker start: config_name=%s", worker.config_name)
-            worker.start_background_reader()
+            if fingerprint == self._config_fingerprint and self.scheduler is not None:
+                self.scheduler.start()
+                return self
+            old_scheduler = self.scheduler
+            self._config_fingerprint = fingerprint
+            self.scheduler = SingleSessionScheduler(config)
+            self.scheduler.on_status_changed = self._status_callback
+            scheduler = self.scheduler
+        if old_scheduler is not None:
+            old_scheduler.stop()
+        scheduler.start()
         return self
 
-    def get_status_all(self):
-        """遍历 workers 返回所有配置的状态和任务缓存。"""
+    def get_configs(self):
+        """返回配置列表缓存。"""
         with self._lock:
-            statuses = {}
-            tasks = {}
-            for config_name, worker in self.workers.items():
-                statuses[config_name] = worker.status
-                tasks[config_name] = ""
-            return {"statuses": statuses, "tasks": tasks}
+            scheduler = self.scheduler
+        if scheduler is None:
+            return []
+        return scheduler.get_configs_snapshot()
+
+    def get_status_all(self):
+        """返回全部状态缓存。"""
+        with self._lock:
+            scheduler = self.scheduler
+        if scheduler is None:
+            return {"statuses": {}, "tasks": {}}
+        return scheduler.get_status_all()
 
     def post_action(self, config_name, action):
-        """从 workers 取指定配置的 worker 并发送动作。"""
+        """提交控制命令。"""
         with self._lock:
-            worker = self.workers.get(config_name)
-        if worker is None:
-            raise WebSocketHijackError("config_not_found")
-        return worker.post_action(action)
+            scheduler = self.scheduler
+        if scheduler is None:
+            raise WebSocketHijackError("scheduler_not_started")
+        return scheduler.post_action(config_name, action)
 
     def stop_all(self):
-        """停止所有 worker 的后台读取线程并清空。"""
+        """停止单会话调度器。"""
         with self._lock:
-            workers_snapshot = list(self.workers.values())
-        for worker in workers_snapshot:
-            worker.stop_event.set()
-        for worker in workers_snapshot:
-            if worker.reader_thread is not None:
-                worker.reader_thread.join(timeout=3)
-        with self._lock:
-            self.workers.clear()
+            scheduler = self.scheduler
+            self.scheduler = None
+        if scheduler is not None:
+            scheduler.stop()
 
 
 def parse_pywebio_message(payload):
