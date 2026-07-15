@@ -148,6 +148,63 @@ class SchedulerButtonSet:
 
 
 @dataclass
+class ControlCommand:
+    """WS 单会话控制命令。"""
+
+    config_name: str
+    action: str
+
+
+class SingleSessionScheduler:
+    """单 PyWebIO session 的 WS 状态扫描与控制调度器。"""
+
+    def __init__(self, config):
+        self.config = dict(config or {})
+        self.ws = None
+        self.stop_event = threading.Event()
+        self.scanner_thread = None
+        self.local_storage = {}
+        self.configs = []
+        self.statuses = {}
+        self.tasks = {}
+        self.buttons = {}
+        self.last_seen_at = {}
+        self.scan_errors = {}
+        self.transport_available = False
+        self.last_transport_error = ""
+        self.on_status_changed = None
+        self._lock = threading.RLock()
+        self._control_queue = []
+
+    def get_configs_snapshot(self):
+        """返回配置列表缓存。"""
+        with self._lock:
+            return list(self.configs)
+
+    def get_status_all(self):
+        """返回状态缓存快照。"""
+        with self._lock:
+            return {
+                "statuses": dict(self.statuses),
+                "tasks": dict(self.tasks),
+            }
+
+    def post_action(self, config_name, action):
+        """提交控制意图；同一配置只保留最后一次未执行意图。"""
+        if action not in {"start", "stop"}:
+            raise WebSocketHijackError("unsupported_action")
+        command = ControlCommand(str(config_name), str(action))
+        with self._lock:
+            self._control_queue = [
+                item for item in self._control_queue
+                if item.config_name != command.config_name
+            ]
+            self._control_queue.append(command)
+        logger.info("WS control enqueued: config_name=%s action=%s", command.config_name, command.action)
+        return {"submitted": True}
+
+
+@dataclass
 class PersistentConfigWorker:
     """常驻配置状态缓存。"""
 
