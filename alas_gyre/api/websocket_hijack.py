@@ -189,6 +189,7 @@ class SingleSessionScheduler:
             return {
                 "statuses": dict(self.statuses),
                 "tasks": dict(self.tasks),
+                "control_errors": dict(self.scan_errors),
             }
 
     def post_action(self, config_name, action):
@@ -248,6 +249,8 @@ class SingleSessionScheduler:
             self.tasks[str(config_name)] = ""
             self.last_seen_at[str(config_name)] = time.monotonic()
             self.scan_errors.pop(str(config_name), None)
+            # 按钮缓存仅用于诊断/监控批量状态；控制执行在同一个 session 内
+            # 重新收集 scheduler_btn scope 以确保 callback 有效性。
             buttons = self.buttons.setdefault(str(config_name), SchedulerButtonSet())
             if start_callback_id:
                 buttons.start_callback_id = start_callback_id
@@ -334,6 +337,7 @@ class SingleSessionScheduler:
             scope_keywords=("alas-instance-",),
             max_messages=1200,
             local_storage=self.local_storage,
+            stop_on_first_match=False,
         )
         self._click_bootstrap_button_if_present(state, "简体中文")
         for label in ("深色", "Dark", "黑暗"):
@@ -368,8 +372,9 @@ class SingleSessionScheduler:
             state = collect_target_state(
                 self.ws,
                 scope_keywords=("header_status", "scheduler_btn"),
-                max_messages=300,
+                max_messages=100,
                 local_storage=self.local_storage,
+                stop_on_first_match=False,
             )
             self._update_config_from_state(config_name, state)
             logger.debug("WS scheduler scan config end: config_name=%s", config_name)
@@ -416,7 +421,11 @@ class SingleSessionScheduler:
 
 @dataclass
 class PersistentConfigWorker:
-    """常驻配置状态缓存。"""
+    """常驻配置状态缓存。
+
+    已废弃：WS 模式已重构为 SingleSessionScheduler 单会话调度器，
+    此类仅保留以兼容历史测试代码，生产路径不再使用。
+    """
 
     config: dict
     config_name: str
@@ -565,7 +574,7 @@ class PersistentConfigWorker:
 class WebSocketHijackManager:
     """WS 劫持连接生命周期管理器（单会话调度器）。"""
 
-    _FINGERPRINT_KEY_FIELDS = ("ip", "port", "current_config")
+    _FINGERPRINT_KEY_FIELDS = ("ip", "port")
 
     def __init__(self):
         """初始化单会话 WS manager。"""
@@ -574,7 +583,6 @@ class WebSocketHijackManager:
         self._lock = threading.Lock()
         self._config_fingerprint = None
         self._status_callback = None
-        self.workers = {}
 
     def set_status_callback(self, callback):
         """注册状态变更回调。"""
@@ -1080,8 +1088,13 @@ def set_websocket_timeout(ws, timeout):
         pass
 
 
-def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=None):
-    """收集 PyWebIO 消息，直到出现目标 scope。"""
+def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=None,
+                        stop_on_first_match=True):
+    """收集 PyWebIO 消息，直到出现目标 scope。
+
+    stop_on_first_match=True 时：首次匹配目标 scope 立即返回该 state。
+    stop_on_first_match=False 时：在 max_messages 范围内持续收集所有匹配 scope。
+    """
     state = PyWebIOState()
     expected = tuple(str(item or "") for item in scope_keywords)
     messages = 0
@@ -1108,7 +1121,8 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
             expected,
             len(state.outputs),
         )
-        return state
+        if stop_on_first_match:
+            return state
     logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
     return state
 
