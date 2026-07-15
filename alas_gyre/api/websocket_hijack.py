@@ -258,7 +258,6 @@ class SingleSessionScheduler:
             self.tasks[str(config_name)] = ""
             self.last_seen_at[str(config_name)] = time.monotonic()
             self.scan_errors.pop(str(config_name), None)
-            self.control_errors.pop(str(config_name), None)
             # 按钮缓存仅用于诊断/监控批量状态；控制执行在同一个 session 内
             # 重新收集 scheduler_btn scope 以确保 callback 有效性。
             buttons = self.buttons.setdefault(str(config_name), SchedulerButtonSet())
@@ -385,6 +384,8 @@ class SingleSessionScheduler:
                 max_messages=300,
                 local_storage=self.local_storage,
                 stop_on_first_match=False,
+                stop_when_all_keywords_matched=True,
+                post_match_drain_messages=5,
             )
             self._update_config_from_state(config_name, state)
             logger.debug("WS scheduler scan config end: config_name=%s", config_name)
@@ -1099,16 +1100,21 @@ def set_websocket_timeout(ws, timeout):
 
 
 def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=None,
-                        stop_on_first_match=True):
+                        stop_on_first_match=True,
+                        stop_when_all_keywords_matched=False,
+                        post_match_drain_messages=0):
     """收集 PyWebIO 消息，直到出现目标 scope。
 
     stop_on_first_match=True 时：首次匹配目标 scope 立即返回该 state。
-    stop_on_first_match=False 时：在 max_messages 范围内持续收集所有匹配 scope，
-    并在所有关键词均命中至少一次后提前退出。
+    stop_when_all_keywords_matched=True 时：所有关键词各命中一次后，继续
+        drain post_match_drain_messages 条消息（再收一次 scope 输出），然后返回。
+    两者都为 False 时：在 max_messages 范围内持续收集所有匹配 scope。
     """
     state = PyWebIOState()
     expected = tuple(str(item or "") for item in scope_keywords)
     matched_keywords = set()
+    all_keywords_matched = False
+    drain_remaining = 0
     messages = 0
     for _ in range(max_messages):
         try:
@@ -1137,13 +1143,25 @@ def collect_target_state(ws, scope_keywords, max_messages=300, local_storage=Non
         )
         if stop_on_first_match:
             return state
-        if matched_keywords >= set(expected):
-            logger.info(
-                "WS target scope all matched: messages=%s keywords=%s",
-                messages,
-                expected,
-            )
-            return state
+        if stop_when_all_keywords_matched and not all_keywords_matched:
+            if matched_keywords >= set(expected):
+                logger.info(
+                    "WS target scope all matched: messages=%s keywords=%s drain=%s",
+                    messages,
+                    expected,
+                    post_match_drain_messages,
+                )
+                all_keywords_matched = True
+                drain_remaining = post_match_drain_messages + 1  # drain one more scope output
+        if all_keywords_matched:
+            drain_remaining -= 1
+            if drain_remaining <= 0:
+                logger.info(
+                    "WS target scope drain done: messages=%s keywords=%s",
+                    messages,
+                    expected,
+                )
+                return state
     logger.info("WS target scope timeout: messages=%s keywords=%s", messages, expected)
     return state
 

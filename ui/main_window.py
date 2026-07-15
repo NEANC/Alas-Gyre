@@ -770,7 +770,12 @@ class CardWidget(QFrame):
                 if control_errors:
                     current_control_error = control_errors.get(self.current_config)
                     if current_control_error:
-                        safe_emit_signal(self.control_error_signal, "control", str(current_control_error))
+                        last = getattr(self, "_last_control_errors", {})
+                        last_msg = str(current_control_error)
+                        if last.get(self.current_config) != last_msg:
+                            last[self.current_config] = last_msg
+                            self._last_control_errors = last
+                            safe_emit_signal(self.control_error_signal, "control", last_msg)
                 if result.degraded:
                     self._notify_websocket_degraded_once()
             else:
