@@ -86,10 +86,8 @@ def get_configs(config):
     """按连接模式获取配置列表。"""
     mode = normalize_connection_mode(config)
     if should_try_websocket_first(mode):
-        manager = websocket_hijack.get_persistent_manager()
-        if getattr(manager, "workers", None):
-            return ControlResult(ok=True, mode="websocket", data={"configs": list(manager.workers.keys())})
-        return ControlResult(ok=True, mode="websocket", data={"configs": websocket_hijack.get_configs(config)})
+        manager = websocket_hijack.get_persistent_manager().ensure_started(config)
+        return ControlResult(ok=True, mode="websocket", data={"configs": manager.get_configs()})
     try:
         resp = api_request("GET", gyre_api_url(config, "configs"), headers=api_headers(config), timeout=2.0)
         if resp.status_code == 200:
