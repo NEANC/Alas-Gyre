@@ -210,12 +210,18 @@ class PersistentConfigWorker:
             return True
         except WEBSOCKET_TIMEOUT_ERRORS:
             return True
-        except Exception:
+        except Exception as exc:
             if self.status != "disconnected":
                 self.status = "disconnected"
                 if callable(self.on_status_changed):
                     self.on_status_changed(self.config_name, "disconnected")
             self.last_error = traceback.format_exc()
+            logger.warning(
+                "WS reader disconnected: config_name=%s error_type=%s error=%s",
+                self.config_name,
+                type(exc).__name__,
+                exc,
+            )
             return False
 
     def start_background_reader(self):
@@ -330,8 +336,10 @@ class WebSocketHijackManager:
 
         with self._lock:
             if fingerprint == self._config_fingerprint and self.workers:
+                logger.debug("WS manager reuse workers: count=%s", len(self.workers))
                 return self
             detected = get_configs(config)
+            logger.info("WS manager detected configs: count=%s configs=%s", len(detected), detected)
             self._config_fingerprint = fingerprint
             new_workers = {}
             for config_name in detected:
@@ -343,11 +351,13 @@ class WebSocketHijackManager:
             stale = [name for name in list(self.workers.keys()) if name not in detected]
             for name in stale:
                 worker = self.workers.pop(name)
+                logger.info("WS worker stop stale: config_name=%s", name)
                 worker.stop_event.set()
                 if worker.reader_thread is not None:
                     worker.reader_thread.join(timeout=3)
 
         for worker in new_workers.values():
+            logger.info("WS worker start: config_name=%s", worker.config_name)
             worker.start_background_reader()
         return self
 
@@ -463,6 +473,12 @@ def handle_pywebio_client_script(ws, message, local_storage=None):
         data = local_storage.get(str(args.get("key", "")))
     elif "document.visibilityState" in code:
         data = "visible"
+    logger.debug(
+        "WS eval reply: task_id=%s data_type=%s code=%s",
+        message.task_id,
+        type(data).__name__,
+        code[:80],
+    )
     send_js_yield_event(ws, message.task_id, data)
     return True
 
@@ -737,6 +753,11 @@ def send_callback_event(ws, task_id, callback_id, data=None):
         "task_id": callback_id,
         "data": data,
     }
+    logger.info(
+        "WS callback send: callback_id=%s data_type=%s",
+        callback_id,
+        type(data).__name__,
+    )
     ws.send(json.dumps(payload, ensure_ascii=False))
 
 
@@ -772,16 +793,30 @@ def check_pywebio_home(config, timeout=3.0):
 def collect_initial_state(ws, max_messages=1200, local_storage=None):
     """从 WebSocket 收集初始 PyWebIO 状态。"""
     state = PyWebIOState()
+    messages = 0
+    timeout_reached = False
     for _ in range(max_messages):
         try:
             payload = ws.recv()
         except WEBSOCKET_TIMEOUT_ERRORS:
+            timeout_reached = True
             break
         if not payload:
             continue
+        messages += 1
         message = parse_pywebio_message(payload)
         state.apply_message(message)
         handle_pywebio_client_script(ws, message, local_storage=local_storage)
+    logger.info(
+        "WS collect summary: messages=%s outputs=%s inputs=%s scripts=%s pins=%s session_id=%s timeout=%s",
+        messages,
+        len(state.outputs),
+        len(state.inputs),
+        len(state.scripts),
+        len(state.pin_names),
+        bool(state.session_id),
+        timeout_reached,
+    )
     return state
 
 
@@ -797,6 +832,8 @@ def collect_state_until_buttons(ws, labels, max_messages=300, local_storage=None
     """收集 PyWebIO 状态直到出现任一目标按钮。"""
     state = PyWebIOState()
     expected_labels = tuple(str(label or "") for label in labels)
+    messages = 0
+    matched_label = ""
     for _ in range(max_messages):
         try:
             payload = ws.recv()
@@ -804,15 +841,32 @@ def collect_state_until_buttons(ws, labels, max_messages=300, local_storage=None
             break
         if not payload:
             continue
+        messages += 1
         message = parse_pywebio_message(payload)
         state.apply_message(message)
         handle_pywebio_client_script(ws, message, local_storage=local_storage)
         for label in expected_labels:
             try:
                 find_button_callback(state, label)
+                matched_label = label
+                logger.info(
+                    "WS collect buttons matched: messages=%s label=%s outputs=%s scripts=%s",
+                    messages,
+                    matched_label,
+                    len(state.outputs),
+                    len(state.scripts),
+                )
                 return state
             except NavigationError:
                 continue
+    logger.info(
+        "WS collect buttons summary: messages=%s matched=%s labels=%s outputs=%s scripts=%s",
+        messages,
+        bool(matched_label),
+        expected_labels,
+        len(state.outputs),
+        len(state.scripts),
+    )
     return state
 
 
@@ -887,8 +941,16 @@ def open_pywebio_websocket(config, timeout=5.0):
             enable_multithread=True,
         )
         set_websocket_timeout(ws, timeout)
+        logger.info("WS connected: url=%s timeout=%s", websocket_url(config), timeout)
         return ws
     except Exception as exc:
+        logger.warning(
+            "WS connect failed: url=%s timeout=%s error_type=%s error=%s",
+            websocket_url(config),
+            timeout,
+            type(exc).__name__,
+            exc,
+        )
         raise WebSocketHandshakeError(str(exc)) from exc
 
 
