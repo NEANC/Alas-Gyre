@@ -113,6 +113,26 @@ class PyWebIOState:
             self.scripts.append(message.spec)
         elif message.command == "output":
             self.outputs.append(message.spec)
+        elif message.command == "output_ctl":
+            target_scope = str(message.spec.get("scope", "") if isinstance(message.spec, dict) else "")
+            method = str(message.spec.get("method", "") if isinstance(message.spec, dict) else "").lower()
+            if target_scope and method in ("replace", "append"):
+                replacement_data = message.spec.get("data")
+                if method == "replace":
+                    self.outputs = [
+                        o for o in self.outputs
+                        if str(o.get("scope", "") if isinstance(o, dict) else "") != target_scope
+                    ]
+                if replacement_data is not None:
+                    self.outputs.append({
+                        "scope": message.spec.get("scope"),
+                        "data": replacement_data,
+                    })
+            elif target_scope:
+                self.outputs[:] = [
+                    o for o in self.outputs
+                    if str(o.get("scope", "") if isinstance(o, dict) else "") != target_scope
+                ]
         elif message.command == "input":
             self.inputs.append(message.spec)
 
