@@ -669,9 +669,9 @@ class CardWidget(QFrame):
                 if result.degraded:
                     self._notify_websocket_degraded_once()
             else:
-                safe_emit_signal(self.control_error_signal, "configs", tr("control_connect_failed"))
+                safe_emit_signal(self.control_error_signal, "configs", control_connect_failed_message(self.config))
         except Exception:
-            safe_emit_signal(self.control_error_signal, "configs", tr("control_connect_failed"))
+            safe_emit_signal(self.control_error_signal, "configs", control_connect_failed_message(self.config))
         finally:
             with self._poll_lock:
                 self._configs_fetching = False
