@@ -7,7 +7,7 @@ from alas_gyre.core.status import normalize_status
 from .widgets import StatusIndicator, ConfigActionButton, MarqueeLabel
 from .window_snap import snap_to_available_screen
 from .i18n import tr
-from .main_window import control_connect_failed_message
+from .main_window import control_connect_failed_message, safe_emit_signal
 from .window_behavior import schedule_frameless_stabilize
 
 class MiniActionButton(ConfigActionButton):
@@ -129,21 +129,21 @@ class MiniConfigRow(QWidget):
                 if result.ok:
                     if not result.data.get("submitted"):
                         status = normalize_status(result.data.get("status", "idle"))
-                        self.main_card.status_all_update_signal.emit({self.config_name: status}, {self.config_name: ""})
+                        safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: status}, {self.config_name: ""})
                         if self.main_card.current_config == self.config_name:
-                            self.main_card.status_update_signal.emit(status, "")
+                            safe_emit_signal(self.main_card.status_update_signal, status, "")
                     if result.degraded:
                         self.main_card._notify_websocket_degraded_once()
                 else:
-                    self.main_card.control_error_signal.emit(action, control_connect_failed_message(self.main_card.config))
+                    safe_emit_signal(self.main_card.control_error_signal, action, control_connect_failed_message(self.main_card.config))
             except Exception as exc:
                 print(f"[错误] 悬浮窗控制命令失败: {exc}")
-                self.main_card.status_all_update_signal.emit({self.config_name: "disconnected"}, {self.config_name: ""})
+                safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: "disconnected"}, {self.config_name: ""})
                 if self.main_card.current_config == self.config_name:
-                    self.main_card.status_update_signal.emit("disconnected", "")
-                self.main_card.control_error_signal.emit(action, control_connect_failed_message(self.main_card.config))
+                    safe_emit_signal(self.main_card.status_update_signal, "disconnected", "")
+                safe_emit_signal(self.main_card.control_error_signal, action, control_connect_failed_message(self.main_card.config))
             finally:
-                self.btn_enable_signal.emit(True)
+                safe_emit_signal(self.btn_enable_signal, True)
         threading.Thread(target=send_req, daemon=True).start()
 
 class MiniWindow(QWidget):
