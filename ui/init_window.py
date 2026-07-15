@@ -422,7 +422,7 @@ class InitSetupWindow(QDialog):
         descs = [
             tr("init_step_runtime_desc"),
             tr("init_step_start_desc"),
-            tr("init_step_test_desc"),
+            tr("init_step_test_desc_websocket") if self._is_websocket_mode_selected() else tr("init_step_test_desc"),
         ]
         self.stepTitleLabel.setText(titles[self.current_step])
         self.stepDescLabel.setText(descs[self.current_step])
@@ -472,6 +472,10 @@ class InitSetupWindow(QDialog):
             self.runtimeBtn.setVisible(not is_websocket)
         if hasattr(self, "openRuntimeDirBtn"):
             self.openRuntimeDirBtn.setVisible(not is_websocket)
+        if self.current_step == 2:
+            self.stepDescLabel.setText(
+                tr("init_step_test_desc_websocket") if is_websocket else tr("init_step_test_desc")
+            )
 
     def _center_on_parent(self):
         if self.parent():
