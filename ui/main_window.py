@@ -14,6 +14,7 @@ from alas_gyre.api.control_gateway import get_status_all as gateway_get_status_a
 from alas_gyre.api.control_gateway import post_action as gateway_post_action
 from alas_gyre.api.connection_mode import CONNECTION_MODE_WEBSOCKET
 from alas_gyre.api.connection_mode import normalize_connection_mode
+from alas_gyre.api.websocket_hijack import get_persistent_manager
 from alas_gyre.core.paths import (
     app_base_dir as app_base_dir, asset_path, config_path,
 )
@@ -335,9 +336,11 @@ class CardWidget(QFrame):
         self.config_delete_result_signal.connect(self._on_config_delete_result)
         self.control_error_signal.connect(self._on_control_error)
 
+        get_persistent_manager().set_status_callback(self._on_worker_status_changed)
+
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
-        self.poll_timer.start(3000)
+        self.poll_timer.start(300)
 
         from PySide6.QtCore import QTimer as CoreQTimer
         CoreQTimer.singleShot(50, self._start_poll_thread)
@@ -720,6 +723,12 @@ class CardWidget(QFrame):
         for config_name in changed_statuses.keys():
             if config_name in self.rows:
                 self.rows[config_name].update_status(self._statuses[config_name], self._tasks.get(config_name, ""))
+
+    def _on_worker_status_changed(self, config_name, status):
+        """worker 状态变更实时回调（来自非 UI 线程，通过 signal 转到主线程）。"""
+        safe_emit_signal(self.status_all_update_signal, {config_name: status}, {config_name: ""})
+        if self.current_config == config_name:
+            safe_emit_signal(self.status_update_signal, status, "")
 
     def _poll_status_task(self):
         if (
