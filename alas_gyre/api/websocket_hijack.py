@@ -259,6 +259,84 @@ class SingleSessionScheduler:
             self.on_status_changed(str(config_name), new_status)
         return changed
 
+    def start(self):
+        """启动单会话扫描线程。"""
+        with self._lock:
+            if self.scanner_thread is not None and self.scanner_thread.is_alive():
+                return self
+            self.stop_event.clear()
+            self.scanner_thread = threading.Thread(target=self._run_loop, daemon=True)
+            self.scanner_thread.start()
+        return self
+
+    def stop(self):
+        """停止扫描线程并关闭 WS。"""
+        self.stop_event.set()
+        ws = self.ws
+        self.ws = None
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        thread = self.scanner_thread
+        if thread is not None:
+            thread.join(timeout=3)
+
+    def _mark_transport_error(self, exc):
+        """标记 WS 传输错误，保留业务状态但清空 callback。"""
+        with self._lock:
+            self.transport_available = False
+            self.last_transport_error = str(exc)
+            self.buttons.clear()
+        logger.warning(
+            "WS scheduler transport disconnected: error_type=%s error=%s",
+            type(exc).__name__,
+            exc,
+        )
+
+    def _connect(self):
+        """创建唯一 WS 连接。"""
+        self.ws = open_pywebio_websocket(self.config)
+        set_websocket_timeout(self.ws, 2.0)
+        with self._lock:
+            self.transport_available = True
+            self.last_transport_error = ""
+        return self.ws
+
+    def _run_loop(self):
+        """单会话扫描主循环。"""
+        while not self.stop_event.is_set():
+            try:
+                if self.ws is None:
+                    self._connect()
+                    self._bootstrap()
+                self._process_one_control_command()
+                self._scan_once()
+            except WEBSOCKET_TIMEOUT_ERRORS:
+                continue
+            except Exception as exc:
+                self._mark_transport_error(exc)
+                try:
+                    if self.ws is not None:
+                        self.ws.close()
+                except Exception:
+                    pass
+                self.ws = None
+                self.stop_event.wait(1.0)
+
+    def _bootstrap(self):
+        """初始化页面并采集配置列表。"""
+        return False
+
+    def _scan_once(self):
+        """执行一轮配置状态扫描。"""
+        return False
+
+    def _process_one_control_command(self):
+        """处理一个控制命令。"""
+        return False
+
 
 @dataclass
 class PersistentConfigWorker:
