@@ -525,6 +525,8 @@ def _has_status_evidence(state):
 def extract_status_all(state, configs=None):
     """从 ALAS 页面输出中提取所有实例状态。"""
     configs = list(configs or extract_instance_names(state))
+    if not configs:
+        return {"statuses": {}, "tasks": {}}
     statuses = {config_name: "error" for config_name in configs}
     status_text = ""
     for output in state.outputs:
