@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import threading
+import time
 import traceback
 
 import requests
@@ -202,6 +203,61 @@ class SingleSessionScheduler:
             self._control_queue.append(command)
         logger.info("WS control enqueued: config_name=%s action=%s", command.config_name, command.action)
         return {"submitted": True}
+
+    def _update_configs_from_state(self, state):
+        """从目标状态更新配置列表缓存。"""
+        configs = extract_instance_names(state)
+        if not configs:
+            return False
+        with self._lock:
+            old_configs = list(self.configs)
+            self.configs = list(configs)
+            for config_name in self.configs:
+                self.statuses.setdefault(config_name, "idle")
+                self.tasks.setdefault(config_name, "")
+                self.buttons.setdefault(config_name, SchedulerButtonSet())
+        changed = old_configs != configs
+        if changed:
+            logger.info("WS scheduler configs updated: configs=%s", configs)
+        return changed
+
+    def _update_config_from_state(self, config_name, state):
+        """从目标状态更新单个配置状态和按钮缓存。"""
+        if not _has_status_evidence(state):
+            with self._lock:
+                self.scan_errors[str(config_name)] = "target_scope_not_found"
+            return False
+        status_data = extract_status_all(state, [str(config_name)])
+        new_status = status_data.get("statuses", {}).get(str(config_name))
+        if not new_status:
+            return False
+        try:
+            start_callback_id, start_value = find_config_action_callback(state, "start")
+        except NavigationError:
+            start_callback_id = ""
+            start_value = None
+        try:
+            stop_callback_id, stop_value = find_config_action_callback(state, "stop")
+        except NavigationError:
+            stop_callback_id = ""
+            stop_value = None
+        with self._lock:
+            old_status = self.statuses.get(str(config_name))
+            self.statuses[str(config_name)] = new_status
+            self.tasks[str(config_name)] = ""
+            self.last_seen_at[str(config_name)] = time.monotonic()
+            self.scan_errors.pop(str(config_name), None)
+            buttons = self.buttons.setdefault(str(config_name), SchedulerButtonSet())
+            if start_callback_id:
+                buttons.start_callback_id = start_callback_id
+                buttons.start_value = start_value
+            if stop_callback_id:
+                buttons.stop_callback_id = stop_callback_id
+                buttons.stop_value = stop_value
+        changed = old_status != new_status
+        if changed and callable(self.on_status_changed):
+            self.on_status_changed(str(config_name), new_status)
+        return changed
 
 
 @dataclass
