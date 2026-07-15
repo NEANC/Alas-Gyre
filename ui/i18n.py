@@ -113,6 +113,7 @@ TRANSLATIONS = {
         "action_failed": "操作失败：{error}",
         "control_failed_title": "操作失败",
         "control_connect_failed": "未连接到 ALAS Overlay API。\n请使用 start_gyre_alas.bat / start_gyre_alas.sh 启动 ALAS 后重试。",
+        "control_websocket_failed": "WebSocket 劫持控制失败。\n请检查 ALAS WebUI 地址、连接模式和目标配置状态后重试。",
         "control_http_failed": "ALAS Overlay API 返回 HTTP {status}。",
         "control_http_failed_with_detail": "ALAS Overlay API 返回 HTTP {status}：\n{error}",
         
@@ -299,6 +300,7 @@ TRANSLATIONS = {
         "action_failed": "Action failed: {error}",
         "control_failed_title": "Action Failed",
         "control_connect_failed": "Cannot connect to ALAS Overlay API.\nStart ALAS with start_gyre_alas.bat / start_gyre_alas.sh and try again.",
+        "control_websocket_failed": "WebSocket hijack control failed.\nCheck the ALAS WebUI address, connection mode, and target config status, then try again.",
         "control_http_failed": "ALAS Overlay API returned HTTP {status}.",
         "control_http_failed_with_detail": "ALAS Overlay API returned HTTP {status}:\n{error}",
         

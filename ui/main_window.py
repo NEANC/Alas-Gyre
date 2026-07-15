@@ -12,6 +12,8 @@ from alas_gyre.api.client import api_headers, api_request, gyre_api_url
 from alas_gyre.api.control_gateway import get_configs as gateway_get_configs
 from alas_gyre.api.control_gateway import get_status_all as gateway_get_status_all
 from alas_gyre.api.control_gateway import post_action as gateway_post_action
+from alas_gyre.api.connection_mode import CONNECTION_MODE_WEBSOCKET
+from alas_gyre.api.connection_mode import normalize_connection_mode
 from alas_gyre.core.paths import (
     app_base_dir as app_base_dir, asset_path, config_path,
 )
@@ -68,6 +70,13 @@ def safe_emit_signal(signal, *args):
         if "Signal source has been deleted" in str(exc):
             return False
         raise
+
+
+def control_connect_failed_message(config):
+    """根据连接模式返回控制失败提示。"""
+    if normalize_connection_mode(config) == CONNECTION_MODE_WEBSOCKET:
+        return tr("control_websocket_failed")
+    return tr("control_connect_failed")
 
 
 MAIN_CARD_WIDTH = 294
@@ -245,7 +254,7 @@ class MainConfigRow(QWidget):
                     if result.degraded:
                         self.main_card._notify_websocket_degraded_once()
                 else:
-                    safe_emit_signal(self.main_card.control_error_signal, action, tr("control_connect_failed"))
+                    safe_emit_signal(self.main_card.control_error_signal, action, control_connect_failed_message(self.main_card.config))
                 time.sleep(0.5)
                 self.main_card._start_poll_thread()
             except Exception as e:
@@ -257,7 +266,7 @@ class MainConfigRow(QWidget):
                 )
                 if self.main_card.current_config == self.config_name:
                     safe_emit_signal(self.main_card.status_update_signal, "disconnected", "")
-                safe_emit_signal(self.main_card.control_error_signal, action, tr("control_connect_failed"))
+                safe_emit_signal(self.main_card.control_error_signal, action, control_connect_failed_message(self.main_card.config))
             finally:
                 safe_emit_signal(self.btn_enable_signal, True)
 
