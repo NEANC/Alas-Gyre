@@ -1272,66 +1272,18 @@ def probe_websocket(config, timeout=5.0):
 
 
 def get_configs(config):
-    """通过 WebSocket 识别 ALAS 多配置。"""
-    result = probe_websocket(config)
-    return result.get("configs", [])
+    """通过单会话调度器获取 ALAS 多配置缓存。"""
+    manager = get_persistent_manager().ensure_started(config)
+    return manager.get_configs()
 
 
 def get_status_all(config):
-    """通过 WebSocket 获取多配置状态。"""
-    result = probe_websocket(config)
-    state = result.get("state")
-    configs = result.get("configs", [])
-    return extract_status_all(state, configs)
+    """通过单会话调度器获取多配置状态。"""
+    manager = get_persistent_manager().ensure_started(config)
+    return manager.get_status_all()
 
 
 def post_config_action(config, config_name, action):
-    """通过 WebSocket 对指定配置执行启动或停止。"""
-    if action not in {"start", "stop"}:
-        raise WebSocketHijackError("unsupported_action")
-    home_error = None
-    try:
-        check_pywebio_home(config)
-    except Exception as exc:
-        home_error = exc
-    try:
-        ws = open_pywebio_websocket(config)
-    except Exception:
-        if home_error:
-            raise home_error
-        raise
-    try:
-        identify_storage = {}
-        state = prepare_alas_page(ws, "", identify_storage)
-        configs = extract_instance_names(state)
-        if config_name not in configs:
-            raise ConfigDetectionError("config_not_found")
-    finally:
-        try:
-            ws.close()
-        except Exception:
-            pass
-    ws = open_pywebio_websocket(config)
-    set_websocket_timeout(ws, 0.5)
-    try:
-        local_storage = dict(identify_storage)
-        local_storage["aside"] = str(config_name or "")
-        state = collect_state_until_buttons(
-            ws,
-            CONFIG_ACTION_KEYWORDS.get(action, ()),
-            max_messages=1500,
-            local_storage=local_storage,
-        )
-        callback_id, value = find_config_action_callback(state, action)
-        send_callback_event(ws, "", callback_id, value)
-        return {
-            "config": config_name,
-            "action": action,
-            "status": "submitted",
-            "submitted": True,
-        }
-    finally:
-        try:
-            ws.close()
-        except Exception:
-            pass
+    """通过单会话调度器提交配置启动或停止。"""
+    manager = get_persistent_manager().ensure_started(config)
+    return manager.post_action(config_name, action)
