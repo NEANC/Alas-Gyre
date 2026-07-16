@@ -527,9 +527,20 @@ class InitSetupWindow(QDialog):
         if idx <= 0:
             return
         _set_to = self._current_steps()[idx - 1][0]
+        if _set_to == self.STEP_MODE:
+            self.selected_flow = None
         self._set_step(_set_to)
 
     def _go_next(self):
+        if self.current_step == self.STEP_MODE:
+            self._sync_config_from_ui()
+            if self._is_websocket_mode_selected():
+                self.selected_flow = "websocket"
+                self._set_step(self.STEP_WS_CONNECTION)
+                return
+            self.selected_flow = "auto"
+            self._set_step(self.STEP_RUNTIME)
+            return
         idx = self._step_index(self.current_step)
         if idx >= len(self._current_steps()) - 1:
             return
