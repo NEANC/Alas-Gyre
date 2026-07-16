@@ -488,7 +488,6 @@ class SettingsWindow(QDialog):
         self._center_on_screen()
         self._force_layout()
         QTimer.singleShot(0, self._force_layout)
-        QTimer.singleShot(100, self._check_for_updates)
 
     def showEvent(self, event):
         super().showEvent(event)

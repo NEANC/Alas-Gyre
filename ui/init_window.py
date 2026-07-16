@@ -136,6 +136,7 @@ class InitSetupWindow(QDialog):
         self.stack = QStackedWidget(right_panel)
         self.stack.setObjectName("initStepStack")
         mode_page = self._build_mode_page()
+        self._refresh_mode_selection_ui()  # 首次显示前按默认模式刷新可见性
         runtime_page = self._build_runtime_page()
         start_page = self._build_start_page()
         connection_page = self._build_test_page()

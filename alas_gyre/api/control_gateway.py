@@ -87,6 +87,9 @@ def get_configs(config):
     mode = normalize_connection_mode(config)
     if should_try_websocket_first(mode):
         manager = websocket_hijack.get_persistent_manager().ensure_started(config)
+        if not manager.ready:
+            return ControlResult(ok=False, mode="websocket", message="websocket_not_ready",
+                                data={"configs": manager.get_configs()})
         return ControlResult(ok=True, mode="websocket", data={"configs": manager.get_configs()})
     try:
         resp = api_request("GET", gyre_api_url(config, "configs"), headers=api_headers(config), timeout=2.0)
@@ -124,12 +127,18 @@ def get_status_all(config):
     return ControlResult(ok=False, mode=mode, message="connect_failed")
 
 
+_VALID_ACTIONS = {"start", "stop"}
+
+
 def post_action(config, config_name, action):
     """按连接模式启动或停止配置。"""
+    if action not in _VALID_ACTIONS:
+        return ControlResult(ok=False, mode=normalize_connection_mode(config), message="unsupported_action")
     mode = normalize_connection_mode(config)
     if should_try_websocket_first(mode):
         manager = websocket_hijack.get_persistent_manager().ensure_started(config)
-        return ControlResult(ok=True, mode="websocket", data=manager.post_action(config_name, action))
+        data = manager.post_action(config_name, action)
+        return ControlResult(ok=True, mode="websocket", data=data)
     try:
         resp = api_request(
             "POST",

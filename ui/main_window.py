@@ -647,10 +647,15 @@ class CardWidget(QFrame):
     def _start_poll_thread(self):
         start_fetch = False
         start_poll = False
+        now = time.monotonic()
         with self._poll_lock:
-            if not hasattr(self, "_configs_fetched") and not self._configs_fetching:
+            if (
+                not hasattr(self, "_configs_fetched")
+                and not self._configs_fetching
+                and now - getattr(self, "_configs_last_fetch_at", 0) >= self._configs_fetch_interval
+            ):
                 self._configs_fetching = True
-                self._configs_last_fetch_at = time.monotonic()
+                self._configs_last_fetch_at = now
                 start_fetch = True
             if not self._polling_status:
                 self._polling_status = True

@@ -121,6 +121,16 @@ def main(current_version):
     configure_windows_app_id()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+
+    # 退出时统一清理常驻 WebSocket 资源
+    def _cleanup_ws():
+        try:
+            from alas_gyre.api.websocket_hijack import get_persistent_manager
+            get_persistent_manager().stop_all()
+        except Exception:
+            pass
+
+    app.aboutToQuit.connect(_cleanup_ws)
     app.setApplicationName("Alas-Gyre")
     app.setApplicationDisplayName("Alas-Gyre")
     app.setOrganizationName("Ange-Katrina")

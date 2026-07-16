@@ -178,6 +178,7 @@ class SingleSessionScheduler:
         self._lock = threading.Lock()
         self._control_queue = []
         self.sidebar_state = PyWebIOState()
+        self._bootstrapped = False
 
     def get_configs_snapshot(self):
         """返回配置列表缓存。"""
@@ -202,7 +203,11 @@ class SingleSessionScheduler:
             }
 
     def post_action(self, config_name, action):
-        """提交控制意图；同一配置只保留最后一次未执行意图。"""
+        """提交控制意图；同一配置只保留最后一次未执行意图。
+
+        Returns:
+            dict 包含 submitted（是否成功入队）和 transport_available（WS 传输是否就绪）。
+        """
         if action not in {"start", "stop"}:
             raise WebSocketHijackError("unsupported_action")
         command = ControlCommand(str(config_name), str(action))
@@ -213,8 +218,9 @@ class SingleSessionScheduler:
                 if item.config_name != command.config_name
             ]
             self._control_queue.append(command)
+            transport_ok = self.transport_available
         logger.info("WS control enqueued: config_name=%s action=%s", command.config_name, command.action)
-        return {"submitted": True}
+        return {"submitted": True, "transport_available": transport_ok}
 
     def _update_configs_from_state(self, state):
         """从目标状态更新配置列表缓存。"""
@@ -296,6 +302,8 @@ class SingleSessionScheduler:
         thread = self.scanner_thread
         if thread is not None:
             thread.join(timeout=3)
+        with self._lock:
+            self._bootstrapped = False
 
     def _mark_transport_error(self, exc):
         """标记 WS 传输错误，保留业务状态但清空 callback。"""
@@ -303,6 +311,7 @@ class SingleSessionScheduler:
             self.transport_available = False
             self.last_transport_error = str(exc)
             self.buttons.clear()
+            self._bootstrapped = False
         logger.warning(
             "WS scheduler transport disconnected: error_type=%s error=%s",
             type(exc).__name__,
@@ -354,7 +363,10 @@ class SingleSessionScheduler:
             if self._click_bootstrap_button_if_present(state, label):
                 break
         self.sidebar_state = state
-        return self._update_configs_from_state(state)
+        result = self._update_configs_from_state(state)
+        with self._lock:
+            self._bootstrapped = True
+        return result
 
     def _click_bootstrap_button_if_present(self, state, label):
         """点击初始化阶段可选按钮。"""
@@ -648,6 +660,33 @@ class WebSocketHijackManager:
         if scheduler is None:
             return {"statuses": {}, "tasks": {}}
         return scheduler.get_status_all()
+
+    @property
+    def ready(self):
+        """单会话调度器是否已启动并完成首次 bootstrap。"""
+        with self._lock:
+            scheduler = self.scheduler
+        if scheduler is None:
+            return False
+        with scheduler._lock:
+            return (
+                scheduler.scanner_thread is not None
+                and scheduler.scanner_thread.is_alive()
+                and scheduler._bootstrapped
+            )
+
+    def get_connection_state(self):
+        """返回 WebSocket 连接状态快照。"""
+        with self._lock:
+            scheduler = self.scheduler
+        if scheduler is None:
+            return {"ready": False, "transport_available": False, "last_transport_error": ""}
+        with scheduler._lock:
+            return {
+                "ready": scheduler.scanner_thread is not None and scheduler.scanner_thread.is_alive(),
+                "transport_available": scheduler.transport_available,
+                "last_transport_error": scheduler.last_transport_error,
+            }
 
     def post_action(self, config_name, action):
         """提交控制命令。"""
