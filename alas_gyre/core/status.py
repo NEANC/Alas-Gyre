@@ -1,4 +1,4 @@
-VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
+VALID_STATUSES = {"idle", "running", "error", "update", "disconnected", "queued"}
 
 
 def normalize_status(status):

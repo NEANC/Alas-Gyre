@@ -132,6 +132,11 @@ class MiniConfigRow(QWidget):
                         safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: status}, {self.config_name: ""})
                         if self.main_card.current_config == self.config_name:
                             safe_emit_signal(self.main_card.status_update_signal, status, "")
+                    elif not result.data.get("transport_available", True):
+                        # 命令已入队但 WS 传输未就绪——给用户可感知反馈
+                        safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: "queued"}, {self.config_name: ""})
+                        if self.main_card.current_config == self.config_name:
+                            safe_emit_signal(self.main_card.status_update_signal, "queued", "")
                     if result.degraded:
                         self.main_card._notify_websocket_degraded_once()
                 else:
