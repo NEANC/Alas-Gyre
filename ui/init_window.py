@@ -242,10 +242,8 @@ class InitSetupWindow(QDialog):
         self.connectionModeCombo.setFixedHeight(30)
         self.connectionModeCombo.addItem(tr("init_mode_auto_title"), "auto")
         self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
-        mode_index = self.connectionModeCombo.findData(normalize_connection_mode(self.config))
-        self.connectionModeCombo.setCurrentIndex(
-            mode_index if mode_index >= 0 else self.connectionModeCombo.findData(CONNECTION_MODE_AUTO)
-        )
+        auto_index = self.connectionModeCombo.findData(CONNECTION_MODE_AUTO)
+        self.connectionModeCombo.setCurrentIndex(auto_index if auto_index >= 0 else 0)
         self.connectionModeCombo.currentIndexChanged.connect(self._refresh_mode_selection_ui)
 
         mode_label = QLabel(tr("connection_mode"), panel)
@@ -507,7 +505,7 @@ class InitSetupWindow(QDialog):
         self.backBtn.setEnabled(current_index > 0)
         self.nextBtn.setVisible(self.current_step not in (self.STEP_TEST, self.STEP_WS_CONNECTION))
         self.finishBtn.setVisible(self.current_step in (self.STEP_TEST, self.STEP_WS_CONNECTION))
-        if self.current_step == self.STEP_WS_CONNECTION and not self.statusLabel.text():
+        if self.current_step == self.STEP_WS_CONNECTION:
             self._set_status(tr("init_ws_connection_hint"), "normal")
         for idx, (row, badge, label) in enumerate(getattr(self, "stepNavItems", [])):
             active = idx == current_index
@@ -746,7 +744,8 @@ class InitSetupWindow(QDialog):
         self.testBtn.setProperty("state", "success" if success else "error")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        self._set_status(tr("test_success") if success else tr("test_failed_short"), "success" if success else "error")
+        status_text = tr("test_success") if success else (message or tr("test_failed_short"))
+        self._set_status(status_text, "success" if success else "error")
         if message and not success:
             print(f"[InitSetup] Connection test failed: {message}")
         QTimer.singleShot(2000, self._reset_test_btn)
