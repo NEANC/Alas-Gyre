@@ -472,12 +472,15 @@ class InitSetupWindow(QDialog):
         current_index = self._step_index(self.current_step)
         current_steps = self._current_steps()
         _step_id, _nav_key, title_key, desc_key = current_steps[current_index]
-        self.stack.setCurrentWidget(self.stack.currentWidget())
+        target_page = self.stepPages.get(step_id)
+        if target_page is not None:
+            self.stack.setCurrentWidget(target_page)
         self.stepProgressLabel.setText(tr("wizard_step_progress", current=current_index + 1, total=len(current_steps)))
         self.stepTitleLabel.setText(tr(title_key))
         self.stepDescLabel.setText(tr(desc_key))
         self.backBtn.setEnabled(current_index > 0)
-        self.nextBtn.setVisible(self.current_step == self.STEP_MODE)
+        is_last = current_index >= len(current_steps) - 1
+        self.nextBtn.setVisible(not is_last)
         self.finishBtn.setVisible(self.current_step in (self.STEP_TEST, self.STEP_WS_CONNECTION))
         for idx, (row, badge, label) in enumerate(getattr(self, "stepNavItems", [])):
             active = idx == current_index
