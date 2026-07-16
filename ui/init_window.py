@@ -135,17 +135,19 @@ class InitSetupWindow(QDialog):
 
         self.stack = QStackedWidget(right_panel)
         self.stack.setObjectName("initStepStack")
+        mode_page = self._build_mode_page()
         runtime_page = self._build_runtime_page()
         start_page = self._build_start_page()
-        test_page = self._build_test_page()
-        self.stack.addWidget(runtime_page)
-        self.stack.addWidget(start_page)
-        self.stack.addWidget(test_page)
+        connection_page = self._build_test_page()
         self.stepPages = {
+            self.STEP_MODE: mode_page,
             self.STEP_RUNTIME: runtime_page,
             self.STEP_START: start_page,
-            self.STEP_TEST: test_page,
+            self.STEP_TEST: connection_page,
+            self.STEP_WS_CONNECTION: connection_page,
         }
+        for page in dict.fromkeys(self.stepPages.values()):
+            self.stack.addWidget(page)
         right_layout.addWidget(self.stack, stretch=1)
         content_layout.addWidget(right_panel, stretch=1)
         body_layout.addLayout(content_layout, stretch=1)
@@ -222,6 +224,49 @@ class InitSetupWindow(QDialog):
         self.stepNavItems.append((row, badge, label))
         return row
 
+    def _build_mode_page(self):
+        page = QWidget(self.bodyBg)
+        page.setObjectName("initStepPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        panel = QFrame(page)
+        panel.setObjectName("initPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(14, 14, 14, 14)
+        panel_layout.setSpacing(10)
+
+        self.connectionModeCombo = QComboBox()
+        self.connectionModeCombo.setObjectName("settingsInput")
+        self.connectionModeCombo.setFixedHeight(30)
+        self.connectionModeCombo.addItem(tr("init_mode_auto_title"), "auto")
+        self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
+        mode_index = self.connectionModeCombo.findData(normalize_connection_mode(self.config))
+        self.connectionModeCombo.setCurrentIndex(
+            mode_index if mode_index >= 0 else self.connectionModeCombo.findData(CONNECTION_MODE_AUTO)
+        )
+        self.connectionModeCombo.currentIndexChanged.connect(self._refresh_mode_selection_ui)
+
+        mode_label = QLabel(tr("connection_mode"), panel)
+        mode_label.setObjectName("formLabel")
+        panel_layout.addWidget(mode_label)
+        panel_layout.addWidget(self.connectionModeCombo)
+
+        self.modeAutoDesc = QLabel(tr("init_mode_auto_desc"), panel)
+        self.modeAutoDesc.setObjectName("initHint")
+        self.modeAutoDesc.setWordWrap(True)
+        panel_layout.addWidget(self.modeAutoDesc)
+
+        self.modeWebSocketDesc = QLabel(tr("init_mode_websocket_desc"), panel)
+        self.modeWebSocketDesc.setObjectName("initSubtle")
+        self.modeWebSocketDesc.setWordWrap(True)
+        panel_layout.addWidget(self.modeWebSocketDesc)
+
+        layout.addWidget(panel)
+        layout.addStretch()
+        return page
+
     def _build_runtime_page(self):
         page = QWidget(self.bodyBg)
         page.setObjectName("initStepPage")
@@ -257,31 +302,6 @@ class InitSetupWindow(QDialog):
         token_layout.addWidget(self.generateBtn)
         panel_layout.addLayout(token_layout)
 
-        mode_layout = QHBoxLayout()
-        mode_layout.setSpacing(10)
-        mode_label = QLabel(tr("connection_mode"))
-        mode_label.setObjectName("formLabel")
-        mode_label.setFixedWidth(82)
-        self.connectionModeCombo = QComboBox()
-        self.connectionModeCombo.setObjectName("settingsInput")
-        self.connectionModeCombo.setFixedHeight(30)
-        self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
-        self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
-        mode_index = self.connectionModeCombo.findData(normalize_connection_mode(self.config))
-        self.connectionModeCombo.setCurrentIndex(
-            mode_index if mode_index >= 0 else self.connectionModeCombo.findData(CONNECTION_MODE_AUTO)
-        )
-        mode_layout.addWidget(mode_label)
-        mode_layout.addWidget(self.connectionModeCombo, stretch=1)
-        panel_layout.addLayout(mode_layout)
-
-        self.connectionModeCombo.currentIndexChanged.connect(self._refresh_connection_mode_ui)
-
-        self.modeHint = QLabel(tr("init_connection_mode_desc"))
-        self.modeHint.setObjectName("initSubtle")
-        self.modeHint.setWordWrap(True)
-        panel_layout.addWidget(self.modeHint)
-
         token_hint = QLabel(tr("token_auto_hint"))
         token_hint.setObjectName("initSubtle")
         token_hint.setWordWrap(True)
@@ -306,7 +326,6 @@ class InitSetupWindow(QDialog):
         self.runtimeBtn.clicked.connect(self._generate_overlay_launcher)
         runtime_btn_layout.addWidget(self.runtimeBtn)
         panel_layout.addLayout(runtime_btn_layout)
-        self._refresh_connection_mode_ui()
         layout.addWidget(panel)
 
         hint = QLabel(tr("runtime_next_hint"), page)
@@ -518,18 +537,14 @@ class InitSetupWindow(QDialog):
     def _is_websocket_mode_selected(self):
         return self.connectionModeCombo.currentData() == "websocket"
 
-    def _refresh_connection_mode_ui(self):
+    def _refresh_mode_selection_ui(self):
+        if not hasattr(self, "connectionModeCombo"):
+            return
         is_websocket = self._is_websocket_mode_selected()
-        if hasattr(self, "modeHint"):
-            self.modeHint.setText(tr("init_websocket_mode_desc") if is_websocket else tr("init_connection_mode_desc"))
-        if hasattr(self, "runtimeBtn"):
-            self.runtimeBtn.setVisible(not is_websocket)
-        if hasattr(self, "openRuntimeDirBtn"):
-            self.openRuntimeDirBtn.setVisible(not is_websocket)
-        if self.current_step == self.STEP_TEST:
-            self.stepDescLabel.setText(
-                tr("init_step_test_desc_websocket") if is_websocket else tr("init_step_test_desc")
-            )
+        if hasattr(self, "modeAutoDesc"):
+            self.modeAutoDesc.setVisible(not is_websocket)
+        if hasattr(self, "modeWebSocketDesc"):
+            self.modeWebSocketDesc.setVisible(is_websocket)
 
     def _center_on_parent(self):
         if self.parent():
