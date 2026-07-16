@@ -505,8 +505,7 @@ class InitSetupWindow(QDialog):
         if hasattr(self, "testStepDesc"):
             self.testStepDesc.setText(tr(self._connection_desc_key()))
         self.backBtn.setEnabled(current_index > 0)
-        is_last = current_index >= len(current_steps) - 1
-        self.nextBtn.setVisible(not is_last)
+        self.nextBtn.setVisible(self.current_step not in (self.STEP_TEST, self.STEP_WS_CONNECTION))
         self.finishBtn.setVisible(self.current_step in (self.STEP_TEST, self.STEP_WS_CONNECTION))
         if self.current_step == self.STEP_WS_CONNECTION and not self.statusLabel.text():
             self._set_status(tr("init_ws_connection_hint"), "normal")
