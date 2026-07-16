@@ -39,6 +39,12 @@ from .window_behavior import install_title_bar_drag, schedule_frameless_stabiliz
 class InitSetupWindow(QDialog):
     test_result_signal = Signal(bool, str)
 
+    STEP_MODE = "mode"
+    STEP_RUNTIME = "runtime"
+    STEP_START = "start"
+    STEP_TEST = "test"
+    STEP_WS_CONNECTION = "ws_connection"
+
     def __init__(
         self,
         parent=None,
@@ -50,7 +56,8 @@ class InitSetupWindow(QDialog):
         self.config_path = config_path
         self.runtime_output_dir = os.path.join(app_base_dir(), RUNTIME_DIR_NAME)
         self.runtime_generated = os.path.isdir(self.runtime_output_dir)
-        self.current_step = 0
+        self.current_step = self.STEP_MODE
+        self.selected_flow = None
 
         self.setObjectName("initWindow")
         self.setFixedSize(680, 420)
@@ -98,23 +105,16 @@ class InitSetupWindow(QDialog):
         self.stepRail = QFrame(self.bodyBg)
         self.stepRail.setObjectName("initStepRail")
         self.stepRail.setFixedWidth(156)
-        rail_layout = QVBoxLayout(self.stepRail)
-        rail_layout.setContentsMargins(14, 14, 14, 14)
-        rail_layout.setSpacing(8)
+        self.railLayout = QVBoxLayout(self.stepRail)
+        self.railLayout.setContentsMargins(14, 14, 14, 14)
+        self.railLayout.setSpacing(8)
 
         self.stepProgressLabel = QLabel(self.stepRail)
         self.stepProgressLabel.setObjectName("initStepProgress")
-        rail_layout.addWidget(self.stepProgressLabel)
-        rail_layout.addSpacing(4)
+        self.railLayout.addWidget(self.stepProgressLabel)
+        self.railLayout.addSpacing(4)
 
         self.stepNavItems = []
-        for number, key in (
-            (1, "init_nav_runtime"),
-            (2, "init_nav_start"),
-            (3, "init_nav_test"),
-        ):
-            rail_layout.addWidget(self._build_step_nav_item(number, key))
-        rail_layout.addStretch()
         content_layout.addWidget(self.stepRail)
 
         right_panel = QWidget(self.bodyBg)
@@ -135,9 +135,17 @@ class InitSetupWindow(QDialog):
 
         self.stack = QStackedWidget(right_panel)
         self.stack.setObjectName("initStepStack")
-        self.stack.addWidget(self._build_runtime_page())
-        self.stack.addWidget(self._build_start_page())
-        self.stack.addWidget(self._build_test_page())
+        runtime_page = self._build_runtime_page()
+        start_page = self._build_start_page()
+        test_page = self._build_test_page()
+        self.stack.addWidget(runtime_page)
+        self.stack.addWidget(start_page)
+        self.stack.addWidget(test_page)
+        self.stepPages = {
+            self.STEP_RUNTIME: runtime_page,
+            self.STEP_START: start_page,
+            self.STEP_TEST: test_page,
+        }
         right_layout.addWidget(self.stack, stretch=1)
         content_layout.addWidget(right_panel, stretch=1)
         body_layout.addLayout(content_layout, stretch=1)
@@ -189,7 +197,7 @@ class InitSetupWindow(QDialog):
         main_layout.addWidget(self.card)
 
         self._center_on_parent()
-        self._set_step(0)
+        self._set_step(self.STEP_MODE)
         self._force_layout()
         QTimer.singleShot(0, self._force_layout)
 
@@ -410,28 +418,70 @@ class InitSetupWindow(QDialog):
             widget.updateGeometry()
             widget.update()
 
-    def _set_step(self, index):
-        self.current_step = max(0, min(index, 2))
-        self.stack.setCurrentIndex(self.current_step)
-        self.stepProgressLabel.setText(tr("wizard_step_progress", current=self.current_step + 1, total=3))
-        titles = [
-            tr("init_step_runtime_title"),
-            tr("init_step_start_title"),
-            tr("init_step_test_title"),
+    def _current_steps(self):
+        if self.selected_flow == "auto":
+            return [
+                (self.STEP_MODE, "init_nav_mode", "init_mode_select_title", "init_mode_select_desc"),
+                (self.STEP_RUNTIME, "init_nav_runtime", "init_step_runtime_title", "init_step_runtime_desc"),
+                (self.STEP_START, "init_nav_start", "init_step_start_title", "init_step_start_desc"),
+                (self.STEP_TEST, "init_nav_test", "init_step_test_title", "init_step_test_desc"),
+            ]
+        if self.selected_flow == "websocket":
+            return [
+                (self.STEP_MODE, "init_nav_mode", "init_mode_select_title", "init_mode_select_desc"),
+                (self.STEP_WS_CONNECTION, "init_nav_ws_connection", "init_ws_connection_title", "init_ws_connection_desc"),
+            ]
+        return [
+            (self.STEP_MODE, "init_nav_mode", "init_mode_select_title", "init_mode_select_desc"),
         ]
-        descs = [
-            tr("init_step_runtime_desc"),
-            tr("init_step_start_desc"),
-            tr("init_step_test_desc_websocket") if self._is_websocket_mode_selected() else tr("init_step_test_desc"),
-        ]
-        self.stepTitleLabel.setText(titles[self.current_step])
-        self.stepDescLabel.setText(descs[self.current_step])
-        self.backBtn.setEnabled(self.current_step > 0)
-        self.nextBtn.setVisible(self.current_step < 2)
-        self.finishBtn.setVisible(self.current_step == 2)
+
+    def _step_index(self, step_id):
+        """获取指定步骤在当前流程中的索引。"""
+        for index, (candidate, _nav_key, _title_key, _desc_key) in enumerate(self._current_steps()):
+            if candidate == step_id:
+                return index
+        return 0
+
+    def _clear_step_rail(self):
+        """清空左侧步骤栏并释放所有组件。"""
+        while self.railLayout.count():
+            item = self.railLayout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _rebuild_step_rail(self):
+        """按当前流程重建左侧步骤栏。"""
+        self._clear_step_rail()
+        self.stepNavItems = []
+        self.stepProgressLabel = QLabel(self.stepRail)
+        self.stepProgressLabel.setObjectName("initStepProgress")
+        self.railLayout.addWidget(self.stepProgressLabel)
+        self.railLayout.addSpacing(4)
+        for number, (_step_id, nav_key, _title_key, _desc_key) in enumerate(self._current_steps(), start=1):
+            self.railLayout.addWidget(self._build_step_nav_item(number, nav_key))
+        self.railLayout.addStretch()
+
+    def _set_step(self, step_id):
+        """切换到指定步骤并同步步骤栏状态。"""
+        step_ids = [step[0] for step in self._current_steps()]
+        if step_id not in step_ids:
+            step_id = self.STEP_MODE
+        self.current_step = step_id
+        self._rebuild_step_rail()
+        current_index = self._step_index(self.current_step)
+        current_steps = self._current_steps()
+        _step_id, _nav_key, title_key, desc_key = current_steps[current_index]
+        self.stack.setCurrentWidget(self.stack.currentWidget())
+        self.stepProgressLabel.setText(tr("wizard_step_progress", current=current_index + 1, total=len(current_steps)))
+        self.stepTitleLabel.setText(tr(title_key))
+        self.stepDescLabel.setText(tr(desc_key))
+        self.backBtn.setEnabled(current_index > 0)
+        self.nextBtn.setVisible(self.current_step == self.STEP_MODE)
+        self.finishBtn.setVisible(self.current_step in (self.STEP_TEST, self.STEP_WS_CONNECTION))
         for idx, (row, badge, label) in enumerate(getattr(self, "stepNavItems", [])):
-            active = idx == self.current_step
-            done = idx < self.current_step
+            active = idx == current_index
+            done = idx < current_index
             badge.setText("✓" if done else str(idx + 1))
             for widget in (row, badge, label):
                 widget.setProperty("active", active)
@@ -442,17 +492,18 @@ class InitSetupWindow(QDialog):
         self._force_layout()
 
     def _go_back(self):
-        if self.current_step == 2 and self._is_websocket_mode_selected():
-            self._set_step(0)
+        idx = self._step_index(self.current_step)
+        if idx <= 0:
             return
-        self._set_step(self.current_step - 1)
+        _set_to = self._current_steps()[idx - 1][0]
+        self._set_step(_set_to)
 
     def _go_next(self):
-        if self.current_step == 0 and self._is_websocket_mode_selected():
-            self._sync_config_from_ui()
-            self._set_step(2)
+        idx = self._step_index(self.current_step)
+        if idx >= len(self._current_steps()) - 1:
             return
-        self._set_step(self.current_step + 1)
+        _set_to = self._current_steps()[idx + 1][0]
+        self._set_step(_set_to)
 
     def _refresh_runtime_buttons(self):
         enabled = bool(self.runtime_generated and os.path.isdir(self.runtime_output_dir))
@@ -472,7 +523,7 @@ class InitSetupWindow(QDialog):
             self.runtimeBtn.setVisible(not is_websocket)
         if hasattr(self, "openRuntimeDirBtn"):
             self.openRuntimeDirBtn.setVisible(not is_websocket)
-        if self.current_step == 2:
+        if self.current_step == self.STEP_TEST:
             self.stepDescLabel.setText(
                 tr("init_step_test_desc_websocket") if is_websocket else tr("init_step_test_desc")
             )
