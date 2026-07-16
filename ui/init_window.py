@@ -381,10 +381,10 @@ class InitSetupWindow(QDialog):
         test_layout.setContentsMargins(14, 14, 14, 14)
         test_layout.setSpacing(10)
 
-        test_hint = QLabel(tr("optional_connection_desc"), test_panel)
-        test_hint.setObjectName("initSubtle")
-        test_hint.setWordWrap(True)
-        test_layout.addWidget(test_hint)
+        self.testStepDesc = QLabel(tr("optional_connection_desc"), test_panel)
+        self.testStepDesc.setObjectName("initSubtle")
+        self.testStepDesc.setWordWrap(True)
+        test_layout.addWidget(self.testStepDesc)
 
         connection_layout = QGridLayout()
         connection_layout.setHorizontalSpacing(10)
@@ -481,6 +481,11 @@ class InitSetupWindow(QDialog):
             self.railLayout.addWidget(self._build_step_nav_item(number, nav_key))
         self.railLayout.addStretch()
 
+    def _connection_desc_key(self):
+        if self.current_step == self.STEP_WS_CONNECTION:
+            return "init_ws_connection_hint"
+        return "optional_connection_desc"
+
     def _set_step(self, step_id):
         """切换到指定步骤并同步步骤栏状态。"""
         step_ids = [step[0] for step in self._current_steps()]
@@ -497,10 +502,14 @@ class InitSetupWindow(QDialog):
         self.stepProgressLabel.setText(tr("wizard_step_progress", current=current_index + 1, total=len(current_steps)))
         self.stepTitleLabel.setText(tr(title_key))
         self.stepDescLabel.setText(tr(desc_key))
+        if hasattr(self, "testStepDesc"):
+            self.testStepDesc.setText(tr(self._connection_desc_key()))
         self.backBtn.setEnabled(current_index > 0)
         is_last = current_index >= len(current_steps) - 1
         self.nextBtn.setVisible(not is_last)
         self.finishBtn.setVisible(self.current_step in (self.STEP_TEST, self.STEP_WS_CONNECTION))
+        if self.current_step == self.STEP_WS_CONNECTION and not self.statusLabel.text():
+            self._set_status(tr("init_ws_connection_hint"), "normal")
         for idx, (row, badge, label) in enumerate(getattr(self, "stepNavItems", [])):
             active = idx == current_index
             done = idx < current_index
